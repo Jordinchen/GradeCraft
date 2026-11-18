@@ -70,6 +70,8 @@ pub struct GridState {
     pub edit_started: bool,
     pub error: Option<String>,
     pub scroll_to_sel: bool,
+    /// Umbenennen im Tabellenkopf
+    pub head_edit: Option<crate::grid::HeadEdit>,
 }
 
 pub enum SessionEvent {

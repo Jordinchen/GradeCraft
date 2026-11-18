@@ -10,6 +10,10 @@ use serde::{Deserialize, Serialize};
 
 const THIRD: f64 = 1.0 / 3.0;
 const EPS: f64 = 1e-6;
+/// Typografisches Minuszeichen für Tendenzen (Anzeige; Eingabe mit „-“).
+pub const MINUS: char = '\u{2212}';
+/// Halbgeviertstrich für Zwischennoten („2–3“).
+pub const EN_DASH: char = '\u{2013}';
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum ScaleKind {
@@ -63,7 +67,12 @@ impl ScaleKind {
 
     /// Wandelt eine Benutzereingabe in einen Notenwert um.
     pub fn parse(self, input: &str) -> Result<f64, ParseError> {
-        let s: String = input.chars().filter(|c| !c.is_whitespace()).collect();
+        // Typografische Zeichen (−, –) wie das normale Minus behandeln
+        let s: String = input
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .map(|c| if c == MINUS || c == EN_DASH { '-' } else { c })
+            .collect();
         if s.is_empty() {
             return Err(ParseError::Empty);
         }
@@ -114,11 +123,11 @@ impl ScaleKind {
                 if (diff + THIRD).abs() < 1e-3 {
                     format!("{}+", base as i64)
                 } else if (diff - THIRD).abs() < 1e-3 {
-                    format!("{}-", base as i64)
+                    format!("{}{MINUS}", base as i64)
                 } else if diff.abs() < 1e-3 {
                     format!("{}", base as i64)
                 } else if ((v - v.floor()) - 0.5).abs() < 1e-3 {
-                    format!("{}-{}", v.floor() as i64, v.floor() as i64 + 1)
+                    format!("{}{EN_DASH}{}", v.floor() as i64, v.floor() as i64 + 1)
                 } else {
                     format_decimal(v, 2)
                 }
@@ -229,8 +238,18 @@ mod tests {
     #[test]
     fn noten_formatieren() {
         let n = ScaleKind::Noten;
-        for s in ["1", "1+", "2-", "3", "5+", "6", "2-3"] {
-            assert_eq!(n.format(n.parse(s).unwrap()), s);
+        for (input, shown) in [
+            ("1", "1"),
+            ("1+", "1+"),
+            ("2-", "2\u{2212}"),
+            ("3", "3"),
+            ("5+", "5+"),
+            ("6", "6"),
+            ("2-3", "2\u{2013}3"),
+        ] {
+            assert_eq!(n.format(n.parse(input).unwrap()), shown);
+            // Angezeigter Text muss wieder einlesbar sein (Bearbeiten mit F2)
+            assert_eq!(n.parse(shown).unwrap(), n.parse(input).unwrap());
         }
     }
 

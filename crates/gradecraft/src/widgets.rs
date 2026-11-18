@@ -6,6 +6,9 @@ use eframe::egui::{
 
 use crate::theme::{self, Palette};
 
+const BIG_TEXT_TOP: f32 = 40.0;
+const BIG_MIN_H: f32 = 80.0;
+
 /// Große Ribbon-Schaltfläche: Icon oben, Beschriftung darunter.
 pub fn big_button(ui: &mut Ui, icon: &str, label: &str, enabled: bool) -> Response {
     let p = Palette::get(ui.ctx());
@@ -13,8 +16,11 @@ pub fn big_button(ui: &mut Ui, icon: &str, label: &str, enabled: bool) -> Respon
         .painter()
         .layout(label.to_string(), FontId::proportional(12.5), p.text, 86.0);
     let width = galley.size().x.max(46.0) + 14.0;
+    // Höhe richtet sich nach der (ggf. zweizeiligen) Beschriftung –
+    // Segoe UI hat höhere Zeilen als die Standardschrift.
+    let height = (BIG_TEXT_TOP + galley.size().y + 6.0).max(BIG_MIN_H);
     let (rect, resp) = ui.allocate_exact_size(
-        vec2(width, 70.0),
+        vec2(width, height),
         if enabled {
             Sense::click()
         } else {
@@ -40,7 +46,10 @@ pub fn big_button(ui: &mut Ui, icon: &str, label: &str, enabled: bool) -> Respon
             FontId::proportional(28.0),
             p.accent_text.gamma_multiply(alpha),
         );
-        let text_pos = egui::pos2(rect.center().x - galley.size().x / 2.0, rect.top() + 40.0);
+        let text_pos = egui::pos2(
+            rect.center().x - galley.size().x / 2.0,
+            rect.top() + BIG_TEXT_TOP,
+        );
         ui.painter().galley_with_override_text_color(
             text_pos,
             galley,
@@ -120,7 +129,7 @@ pub fn group(ui: &mut Ui, title: &str, add: impl FnOnce(&mut Ui)) {
             let r = ui
                 .horizontal_top(|ui| {
                     ui.spacing_mut().item_spacing.x = 2.0;
-                    ui.set_min_height(72.0);
+                    ui.set_min_height(BIG_MIN_H);
                     add(ui);
                 })
                 .response
@@ -133,7 +142,7 @@ pub fn group(ui: &mut Ui, title: &str, add: impl FnOnce(&mut Ui)) {
         ui.painter()
             .layout_no_wrap(title.to_string(), FontId::proportional(11.5), p.text_weak);
     let width = row.width().max(caption.size().x + 12.0);
-    let rect = Rect::from_min_size(top, vec2(width, 92.0));
+    let rect = Rect::from_min_size(top, vec2(width, row.height() + 20.0));
     ui.painter().galley(
         egui::pos2(
             rect.center().x - caption.size().x / 2.0,
@@ -203,13 +212,30 @@ pub fn card<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
 
 /// Zahl mit Komma als Eingabefeld (Gewichtungen).
 pub fn weight_edit(ui: &mut Ui, value: &mut f64) -> Response {
-    ui.add(
-        egui::DragValue::new(value)
-            .range(0.0..=100.0)
-            .speed(0.05)
-            .max_decimals(2)
-            .custom_formatter(|v, _| fmt_weight(v))
-            .custom_parser(gradecraft_core::scale::parse_decimal),
+    ui.add(weight_drag(value))
+}
+
+/// Eingabefeld für eine Gewichtung (ziehen oder klicken und tippen).
+pub fn weight_drag(value: &mut f64) -> egui::DragValue<'_> {
+    egui::DragValue::new(value)
+        .range(0.0..=100.0)
+        .speed(0.05)
+        .max_decimals(2)
+        .custom_formatter(|v, _| fmt_weight(v))
+        .custom_parser(gradecraft_core::scale::parse_decimal)
+}
+
+/// Rechteck für ein einzeiliges Textfeld, vertikal mittig in `cell`
+/// (unabhängig von der Zeilenhöhe der verwendeten Schrift).
+pub fn centered_text_rect(ui: &Ui, cell: Rect, font: &FontId) -> Rect {
+    let h = ui
+        .painter()
+        .layout_no_wrap("Ag".into(), font.clone(), Color32::WHITE)
+        .size()
+        .y;
+    Rect::from_center_size(
+        cell.center(),
+        vec2(cell.width() - 6.0, (h + 4.0).min(cell.height() - 2.0)),
     )
 }
 

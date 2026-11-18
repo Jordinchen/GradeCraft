@@ -167,3 +167,35 @@ fn vorschlag_bestaetigen_und_paedagogisch() {
     assert!(f.is_pedagogical());
     assert!(h.state().dialog.is_none());
 }
+
+#[test]
+fn leistung_im_tabellenkopf_umbenennen() {
+    let s = session();
+    let (ka1, _, _) = first_cols(&s);
+    let mut h = harness(s);
+    h.state_mut().grid.head_edit = Some(crate::grid::HeadEdit {
+        target: crate::grid::HeadTarget::Column(ka1),
+        text: "KA 1".into(),
+        started: true,
+    });
+    h.run();
+    // Text ist komplett markiert – Tippen ersetzt ihn
+    type_text(&mut h, "Mappenführung");
+    h.key_press(egui::Key::Enter);
+    h.run();
+    let name = h.state().db.courses[0]
+        .find_column(ka1)
+        .unwrap()
+        .1
+        .name
+        .clone();
+    assert_eq!(name, "Mappenführung");
+    assert!(h.state().grid.head_edit.is_none());
+    // Rückgängig stellt den alten Namen wieder her
+    let ctx = h.ctx.clone();
+    h.state_mut().undo(&ctx);
+    assert_eq!(
+        h.state().db.courses[0].find_column(ka1).unwrap().1.name,
+        "KA 1"
+    );
+}

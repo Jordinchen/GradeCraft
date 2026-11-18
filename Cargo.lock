@@ -1513,7 +1513,7 @@ dependencies = [
 
 [[package]]
 name = "gradecraft"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chrono",
  "directories",
@@ -1530,7 +1530,7 @@ dependencies = [
 
 [[package]]
 name = "gradecraft-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aes-gcm",
  "argon2",

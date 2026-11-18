@@ -11,17 +11,30 @@ use crate::config::AppConfig;
 use crate::dialogs::Dialog;
 use crate::session::{CourseTab, Session};
 use crate::theme::{self, Palette};
-use crate::widgets::fmt_weight;
+use crate::widgets::{centered_text_rect, fmt_weight, weight_drag};
 
 const ROW_H: f32 = 30.0;
-const HEAD_H: f32 = 56.0;
+/// Kopfzeilen: Leistungsbereich, Leistung, Wertigkeit
+const HEAD_ROW1: f32 = 28.0;
+const HEAD_ROW2: f32 = 26.0;
+const HEAD_ROW3: f32 = 26.0;
+const HEAD_H: f32 = HEAD_ROW1 + HEAD_ROW2 + HEAD_ROW3;
 
 #[derive(Clone, Copy, PartialEq)]
 enum GCol {
     Num,
     Name,
-    Grade { area: Id, col: Id },
-    AreaAvg { area: Id },
+    /// `w`: Spaltenbreite, passend zur Beschriftung
+    Grade {
+        area: Id,
+        col: Id,
+        w: f32,
+    },
+    /// `w`: so breit, dass das Bereichsband (Name, Gewicht, %) hineinpasst
+    AreaAvg {
+        area: Id,
+        w: f32,
+    },
     HalfFinal,
     Total,
     Suggest,
@@ -33,8 +46,8 @@ impl GCol {
         match self {
             GCol::Num => 34.0,
             GCol::Name => 210.0,
-            GCol::Grade { .. } => 66.0,
-            GCol::AreaAvg { .. } => 70.0,
+            GCol::Grade { w, .. } => w,
+            GCol::AreaAvg { w, .. } => w,
             GCol::HalfFinal => 74.0,
             GCol::Total => 78.0,
             GCol::Suggest => 82.0,
@@ -43,10 +56,33 @@ impl GCol {
     }
     fn area(self) -> Option<Id> {
         match self {
-            GCol::Grade { area, .. } | GCol::AreaAvg { area } => Some(area),
+            GCol::Grade { area, .. } | GCol::AreaAvg { area, .. } => Some(area),
             _ => None,
         }
     }
+}
+
+/// Was im Tabellenkopf umbenannt wird.
+#[derive(Clone, Copy, PartialEq)]
+pub enum HeadTarget {
+    Area(Id),
+    Column(Id),
+}
+
+/// Laufende Umbenennung im Tabellenkopf.
+pub struct HeadEdit {
+    pub target: HeadTarget,
+    pub text: String,
+    pub started: bool,
+}
+
+/// Änderungen aus dem Tabellenkopf (werden nach dem Zeichnen angewendet).
+enum HeadChange {
+    Checkpoint,
+    AreaName(Id, String),
+    ColumnName(Id, String),
+    AreaWeight(Id, f64),
+    ColumnWeight(Id, f64),
 }
 
 /// Zelle, die gerade bearbeitet wird.
@@ -57,16 +93,35 @@ pub struct EditCell {
     pub fresh: bool,
 }
 
-fn columns(course: &Course, half: Half) -> Vec<GCol> {
+fn columns(ui: &egui::Ui, course: &Course, half: Half) -> Vec<GCol> {
     let mut cols = vec![GCol::Num, GCol::Name];
+    let text_w = |text: String, font: FontId| {
+        ui.painter()
+            .layout_no_wrap(text, font, Color32::WHITE)
+            .size()
+            .x
+    };
     for a in &course.scheme.areas {
+        let mut band_w = 0.0;
         for c in a.columns.iter().filter(|c| c.half == half) {
+            let w = (text_w(c.name.clone(), FontId::proportional(12.0)) + 18.0).clamp(66.0, 220.0);
+            band_w += w;
             cols.push(GCol::Grade {
                 area: a.id,
                 col: c.id,
+                w,
             });
         }
-        cols.push(GCol::AreaAvg { area: a.id });
+        // Bereichsband: Name + Gewichtsfeld (44) + „= 100 %“ + Abstände
+        let needed = text_w(a.name.clone(), theme::bold(12.5))
+            + 44.0
+            + text_w("= 100 %".into(), FontId::proportional(12.0))
+            + 36.0;
+        let avg_w = (needed - band_w).max(70.0);
+        cols.push(GCol::AreaAvg {
+            area: a.id,
+            w: avg_w,
+        });
     }
     if half == Half::H2 && matches!(course.scheme.year_mode, YearMode::Halbjahre { .. }) {
         cols.push(GCol::HalfFinal);
@@ -153,7 +208,7 @@ impl Session {
         } else {
             Period::Schuljahr
         };
-        let cols = columns(&course, half);
+        let cols = columns(ui, &course, half);
         let edit_cols: Vec<usize> = cols
             .iter()
             .enumerate()
@@ -403,7 +458,8 @@ impl Session {
         half: Half,
         ro: bool,
     ) {
-        let p = Palette::get(ui.ctx());
+        let ctx = ui.ctx().clone();
+        let p = Palette::get(&ctx);
         let (rect, _) = ui.allocate_exact_size(vec2(total_w, HEAD_H), Sense::hover());
         let painter = ui.painter_at(rect);
         painter.rect_filled(
@@ -417,7 +473,9 @@ impl Session {
             p.header,
         );
         let total_weight: f64 = course.scheme.areas.iter().map(|a| a.weight).sum();
-        let mid = rect.top() + HEAD_H / 2.0;
+        let y1 = rect.top() + HEAD_ROW1;
+        let y2 = y1 + HEAD_ROW2;
+        let mut changes: Vec<HeadChange> = Vec::new();
         let mut x = rect.left();
         let mut i = 0;
         let small = FontId::proportional(12.0);
@@ -442,91 +500,57 @@ impl Session {
                 } else {
                     0.0
                 };
-                let band = Rect::from_min_size(pos2(start, rect.top()), vec2(band_w, HEAD_H / 2.0));
-                painter.text(
-                    band.center(),
-                    Align2::CENTER_CENTER,
-                    format!("{}  ·  {:.0} %", area.name, pct),
-                    theme::bold(12.5),
-                    p.accent_text,
-                );
+                let band = Rect::from_min_size(pos2(start, rect.top()), vec2(band_w, HEAD_ROW1));
+                self.area_band(ui, band, area, pct, ro, &mut changes);
                 painter.line_segment(
-                    [pos2(start + 4.0, mid), pos2(start + band_w - 4.0, mid)],
+                    [pos2(start + 4.0, y1), pos2(start + band_w - 4.0, y1)],
                     Stroke::new(1.0, p.border),
                 );
+                painter.line_segment(
+                    [pos2(start + 4.0, y2), pos2(start + band_w - 4.0, y2)],
+                    Stroke::new(0.5, p.border),
+                );
+
                 for c in &cols[i..j] {
-                    let r = Rect::from_min_size(pos2(x, mid), vec2(c.width(), HEAD_H / 2.0));
+                    let r2 = Rect::from_min_size(pos2(x, y1), vec2(c.width(), HEAD_ROW2));
+                    let r3 = Rect::from_min_size(pos2(x, y2), vec2(c.width(), HEAD_ROW3));
                     match *c {
                         GCol::Grade { col, .. } => {
                             let column = area.columns.iter().find(|cc| cc.id == col).unwrap();
-                            let label = if (column.weight - 1.0).abs() > 1e-9 {
-                                format!("{} ×{}", column.name, fmt_weight(column.weight))
-                            } else {
-                                column.name.clone()
-                            };
-                            painter.text(
-                                r.center(),
-                                Align2::CENTER_CENTER,
-                                label,
-                                small.clone(),
-                                p.text,
-                            );
-                            let resp = ui.interact(r, ui.id().with(("head", col)), Sense::click());
-                            let (avg, n) = calc::column_stats(course, col);
-                            let dist = calc::distribution(course, col);
-                            let resp = resp.on_hover_ui(|ui| {
-                                ui.label(RichText::new(&column.name).strong());
-                                ui.label(format!("Gewichtung: {}", fmt_weight(column.weight)));
-                                ui.label(format!(
-                                    "Ø Klasse: {}  ({} Noten)",
-                                    avg.map(|a| course.scale.format_avg(a))
-                                        .unwrap_or("–".into()),
-                                    n
-                                ));
-                                ui.label(format!(
-                                    "Notenspiegel: 1: {} · 2: {} · 3: {} · 4: {} · 5: {} · 6: {}",
-                                    dist[0], dist[1], dist[2], dist[3], dist[4], dist[5]
-                                ));
-                                ui.label(
-                                    RichText::new("Rechtsklick: bearbeiten / löschen").size(11.0),
+                            self.column_head(ui, r2, course, column, ro, &mut changes);
+                            // Wertigkeit der Leistung
+                            let mut w = column.weight;
+                            if ro {
+                                painter.text(
+                                    r3.center(),
+                                    Align2::CENTER_CENTER,
+                                    format!("×{}", fmt_weight(w)),
+                                    small.clone(),
+                                    p.text_weak,
                                 );
-                            });
-                            let cid = course.id;
-                            resp.context_menu(|ui| {
-                                if ui
-                                    .add_enabled(
-                                        !ro,
-                                        egui::Button::new(format!(
-                                            "{} Leistung bearbeiten …",
-                                            ic::PENCIL_SIMPLE
-                                        )),
+                            } else {
+                                let resp = ui
+                                    .put(
+                                        Rect::from_center_size(
+                                            r3.center(),
+                                            vec2((c.width() - 18.0).min(48.0), 20.0),
+                                        ),
+                                        weight_drag(&mut w).prefix("×"),
                                     )
-                                    .clicked()
-                                {
-                                    self.dialog = Some(Dialog::EditColumn {
-                                        course: cid,
-                                        column: col,
-                                        name: column.name.clone(),
-                                        weight: column.weight,
-                                        half: column.half,
-                                    });
+                                    .on_hover_text(format!(
+                                        "Wertigkeit von „{}“ (ziehen oder klicken und tippen)",
+                                        column.name
+                                    ));
+                                if resp.drag_started() || resp.gained_focus() {
+                                    changes.push(HeadChange::Checkpoint);
                                 }
-                                if ui
-                                    .add_enabled(
-                                        !ro,
-                                        egui::Button::new(format!(
-                                            "{} Leistung löschen",
-                                            ic::TRASH
-                                        )),
-                                    )
-                                    .clicked()
-                                {
-                                    self.dialog =
-                                        Some(Dialog::confirm_delete_column(&self.db, cid, col));
+                                if resp.changed() {
+                                    changes.push(HeadChange::ColumnWeight(col, w));
                                 }
-                            });
+                            }
                         }
                         GCol::AreaAvg { .. } => {
+                            let r = r2.union(r3);
                             painter.rect_filled(r, CornerRadius::ZERO, p.avg_bg);
                             let label = if half == Half::H2
                                 && course.scheme.year_mode == YearMode::AlleNoten
@@ -563,21 +587,21 @@ impl Session {
                 GCol::Name => ("Name".to_string(), None),
                 GCol::HalfFinal => ("Halbjahres-\nnote".to_string(), Some(p.avg_bg)),
                 GCol::Total => (
-                    if half == Half::H1 {
+                    (if half == Half::H1 {
                         "Ø Halbjahr"
                     } else {
                         "Ø Schuljahr"
-                    }
+                    })
                     .to_string(),
                     Some(p.avg_bg),
                 ),
                 GCol::Suggest => ("Vorschlag".to_string(), Some(p.avg_bg)),
                 GCol::Final => (
-                    if half == Half::H1 {
+                    (if half == Half::H1 {
                         "Halbjahresnote"
                     } else {
                         "Schuljahresnote"
-                    }
+                    })
                     .to_string(),
                     Some(p.final_bg),
                 ),
@@ -586,17 +610,32 @@ impl Session {
             if let Some(bg) = bg {
                 painter.rect_filled(r, CornerRadius::ZERO, bg);
             }
-            let align = if col == GCol::Name {
-                Align2::LEFT_CENTER
+            if col == GCol::Name {
+                let top = Rect::from_min_max(r.min, pos2(r.right(), y2));
+                painter.text(
+                    top.left_center() + vec2(8.0, 0.0),
+                    Align2::LEFT_CENTER,
+                    label,
+                    theme::bold(12.5),
+                    p.text,
+                );
+                // Beschriftung der Wertigkeitszeile
+                painter.text(
+                    pos2(r.right() - 8.0, y2 + HEAD_ROW3 / 2.0),
+                    Align2::RIGHT_CENTER,
+                    "Wertigkeit",
+                    small.clone(),
+                    p.text_weak,
+                );
             } else {
-                Align2::CENTER_CENTER
-            };
-            let pos = if col == GCol::Name {
-                r.left_center() + vec2(8.0, 0.0)
-            } else {
-                r.center()
-            };
-            painter.text(pos, align, label, theme::bold(12.5), p.text);
+                painter.text(
+                    r.center(),
+                    Align2::CENTER_CENTER,
+                    label,
+                    theme::bold(12.5),
+                    p.text,
+                );
+            }
             if col == GCol::Total {
                 let tip = match (half, course.scheme.year_mode) {
                     (Half::H1, _) => {
@@ -621,6 +660,284 @@ impl Session {
             [rect.left_bottom(), rect.right_bottom()],
             Stroke::new(1.0, p.border),
         );
+        self.apply_head_changes(&ctx, course.id, changes);
+    }
+
+    /// Bereichsband: Name (klicken zum Umbenennen), Gewicht und Anteil in %.
+    fn area_band(
+        &mut self,
+        ui: &mut egui::Ui,
+        band: Rect,
+        area: &gradecraft_core::Area,
+        pct: f64,
+        ro: bool,
+        changes: &mut Vec<HeadChange>,
+    ) {
+        let p = Palette::get(ui.ctx());
+        let name_font = theme::bold(12.5);
+        let pct_text = format!("= {pct:.0} %");
+        let pct_w = ui
+            .painter()
+            .layout_no_wrap(pct_text.clone(), FontId::proportional(12.0), p.text)
+            .size()
+            .x;
+        let weight_w = if ro { 0.0 } else { 44.0 };
+        let name_w_full = ui
+            .painter()
+            .layout_no_wrap(area.name.clone(), name_font.clone(), p.text)
+            .size()
+            .x;
+        let max_name_w = (band.width() - weight_w - pct_w - 30.0).max(40.0);
+        let name_w = name_w_full.min(max_name_w);
+        let total = name_w + 8.0 + weight_w + 6.0 + pct_w;
+        let mut x = (band.center().x - total / 2.0).max(band.left() + 6.0);
+        let cy = band.center().y;
+
+        let name_rect =
+            Rect::from_min_size(pos2(x, band.top() + 2.0), vec2(name_w, band.height() - 4.0));
+        let editing = self
+            .grid
+            .head_edit
+            .as_ref()
+            .is_some_and(|e| e.target == HeadTarget::Area(area.id));
+        if editing {
+            let r = Rect::from_min_max(
+                pos2(band.left() + 4.0, band.top()),
+                pos2(band.right() - weight_w - pct_w - 14.0, band.bottom()),
+            );
+            self.head_text_edit(ui, r, name_font, changes);
+        } else {
+            let galley =
+                ui.painter()
+                    .layout(area.name.clone(), name_font, p.accent_text, name_w + 1.0);
+            ui.painter_at(name_rect).galley(
+                pos2(x, cy - galley.size().y.min(name_rect.height()) / 2.0),
+                galley,
+                p.accent_text,
+            );
+            let resp = ui.interact(
+                name_rect,
+                ui.id().with(("area-name", area.id)),
+                Sense::CLICK,
+            );
+            if !ro {
+                let resp = resp
+                    .on_hover_text("Klicken zum Umbenennen")
+                    .on_hover_cursor(egui::CursorIcon::Text);
+                if resp.clicked() {
+                    self.grid.head_edit = Some(HeadEdit {
+                        target: HeadTarget::Area(area.id),
+                        text: area.name.clone(),
+                        started: true,
+                    });
+                }
+            }
+        }
+        x += name_w + 8.0;
+        if !ro {
+            let mut w = area.weight;
+            let resp = ui
+                .put(
+                    Rect::from_min_size(pos2(x, cy - 10.0), vec2(weight_w, 20.0)),
+                    weight_drag(&mut w).prefix("×"),
+                )
+                .on_hover_text(format!(
+                    "Gewichtung von „{}“ gegenüber den anderen Bereichen",
+                    area.name
+                ));
+            if resp.drag_started() || resp.gained_focus() {
+                changes.push(HeadChange::Checkpoint);
+            }
+            if resp.changed() {
+                changes.push(HeadChange::AreaWeight(area.id, w));
+            }
+            x += weight_w + 6.0;
+        }
+        ui.painter().text(
+            pos2(x, cy),
+            Align2::LEFT_CENTER,
+            pct_text,
+            FontId::proportional(12.0),
+            p.accent_text,
+        );
+    }
+
+    /// Name einer Leistung im Kopf: klicken zum Umbenennen, Tooltip mit Statistik.
+    fn column_head(
+        &mut self,
+        ui: &mut egui::Ui,
+        r: Rect,
+        course: &Course,
+        column: &gradecraft_core::Column,
+        ro: bool,
+        changes: &mut Vec<HeadChange>,
+    ) {
+        let p = Palette::get(ui.ctx());
+        let col = column.id;
+        let editing = self
+            .grid
+            .head_edit
+            .as_ref()
+            .is_some_and(|e| e.target == HeadTarget::Column(col));
+        if editing {
+            self.head_text_edit(ui, r, FontId::proportional(12.0), changes);
+            return;
+        }
+        ui.painter_at(r).text(
+            r.center(),
+            Align2::CENTER_CENTER,
+            &column.name,
+            FontId::proportional(12.0),
+            p.text,
+        );
+        let resp = ui.interact(r, ui.id().with(("head", col)), Sense::CLICK);
+        let (avg, n) = calc::column_stats(course, col);
+        let dist = calc::distribution(course, col);
+        let resp = resp.on_hover_ui(|ui| {
+            ui.label(RichText::new(&column.name).strong());
+            ui.label(format!("Wertigkeit: {}", fmt_weight(column.weight)));
+            ui.label(format!(
+                "Ø Klasse: {}  ({} Noten)",
+                avg.map(|a| course.scale.format_avg(a))
+                    .unwrap_or("–".into()),
+                n
+            ));
+            ui.label(format!(
+                "Notenspiegel: 1: {} · 2: {} · 3: {} · 4: {} · 5: {} · 6: {}",
+                dist[0], dist[1], dist[2], dist[3], dist[4], dist[5]
+            ));
+            if !ro {
+                ui.label(RichText::new("Klicken: umbenennen · Rechtsklick: mehr").size(11.0));
+            }
+        });
+        if ro {
+            return;
+        }
+        if resp.clicked() {
+            self.grid.head_edit = Some(HeadEdit {
+                target: HeadTarget::Column(col),
+                text: column.name.clone(),
+                started: true,
+            });
+        }
+        let cid = course.id;
+        resp.context_menu(|ui| {
+            if ui
+                .button(format!("{} Leistung bearbeiten …", ic::PENCIL_SIMPLE))
+                .clicked()
+            {
+                self.dialog = Some(Dialog::EditColumn {
+                    course: cid,
+                    column: col,
+                    name: column.name.clone(),
+                    weight: column.weight,
+                    half: column.half,
+                });
+            }
+            if ui
+                .button(format!("{} Leistung löschen", ic::TRASH))
+                .clicked()
+            {
+                self.dialog = Some(Dialog::confirm_delete_column(&self.db, cid, col));
+            }
+        });
+    }
+
+    /// Textfeld zum Umbenennen im Kopf. Enter/Klick woanders übernimmt, Esc bricht ab.
+    fn head_text_edit(
+        &mut self,
+        ui: &mut egui::Ui,
+        r: Rect,
+        font: FontId,
+        changes: &mut Vec<HeadChange>,
+    ) {
+        let p = Palette::get(ui.ctx());
+        let id = egui::Id::new("grid-head-editor");
+        let text_rect = centered_text_rect(ui, r, &font);
+        let Some(edit) = self.grid.head_edit.as_mut() else {
+            return;
+        };
+        ui.painter()
+            .rect_filled(r.shrink(1.0), CornerRadius::same(3), p.sheet);
+        let resp = ui.put(
+            text_rect,
+            egui::TextEdit::singleline(&mut edit.text)
+                .id(id)
+                .font(font)
+                .horizontal_align(egui::Align::Center)
+                .vertical_align(egui::Align::Center)
+                .margin(egui::Margin::symmetric(2, 1))
+                .frame(egui::Frame::NONE),
+        );
+        ui.painter().rect_stroke(
+            r.shrink(1.0),
+            CornerRadius::same(3),
+            Stroke::new(1.5, p.accent_text),
+            egui::StrokeKind::Inside,
+        );
+        if std::mem::take(&mut edit.started) {
+            resp.request_focus();
+            if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), id) {
+                let n = edit.text.chars().count();
+                state
+                    .cursor
+                    .set_char_range(Some(egui::text::CCursorRange::two(
+                        egui::text::CCursor::new(0),
+                        egui::text::CCursor::new(n),
+                    )));
+                state.store(ui.ctx(), id);
+            }
+            return;
+        }
+        if resp.lost_focus() {
+            let esc = ui.input(|i| i.key_pressed(Key::Escape));
+            let edit = self.grid.head_edit.take().unwrap();
+            let name = edit.text.trim().to_string();
+            if !esc && !name.is_empty() {
+                changes.push(match edit.target {
+                    HeadTarget::Area(a) => HeadChange::AreaName(a, name),
+                    HeadTarget::Column(c) => HeadChange::ColumnName(c, name),
+                });
+            }
+        }
+    }
+
+    fn apply_head_changes(&mut self, ctx: &egui::Context, course_id: Id, changes: Vec<HeadChange>) {
+        if changes.is_empty() {
+            return;
+        }
+        let mut modified = false;
+        for ch in changes {
+            if let HeadChange::Checkpoint = ch {
+                self.checkpoint();
+                continue;
+            }
+            // Umbenennen ist ein eigener Rückgängig-Schritt
+            if matches!(ch, HeadChange::AreaName(..) | HeadChange::ColumnName(..)) {
+                self.checkpoint();
+            }
+            let Some(c) = self.db.course_mut(course_id) else {
+                return;
+            };
+            for a in &mut c.scheme.areas {
+                match &ch {
+                    HeadChange::AreaName(id, n) if a.id == *id => a.name = n.clone(),
+                    HeadChange::AreaWeight(id, w) if a.id == *id => a.weight = *w,
+                    _ => {}
+                }
+                for col in &mut a.columns {
+                    match &ch {
+                        HeadChange::ColumnName(id, n) if col.id == *id => col.name = n.clone(),
+                        HeadChange::ColumnWeight(id, w) if col.id == *id => col.weight = *w,
+                        _ => {}
+                    }
+                }
+            }
+            modified = true;
+        }
+        if modified {
+            self.touch(ctx);
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -812,7 +1129,7 @@ impl Session {
                         });
                     }
                 }
-                GCol::AreaAvg { area } => {
+                GCol::AreaAvg { area, .. } => {
                     painter.rect_filled(r, CornerRadius::ZERO, p.avg_bg.gamma_multiply(0.7));
                     if let Some(v) = calc::area_average(course, s.id, area, avg_halves) {
                         painter.text(
@@ -918,14 +1235,18 @@ impl Session {
 
         let edit = self.grid.edit.as_mut().unwrap();
         ui.painter().rect_filled(r, CornerRadius::ZERO, p.sheet);
+        let font = FontId::proportional(14.5);
+        // Textfeld vertikal mittig, passend zur tatsächlichen Schrifthöhe
+        let text_rect = centered_text_rect(ui, r, &font);
         let te = egui::TextEdit::singleline(&mut edit.text)
             .id(id)
             .horizontal_align(egui::Align::Center)
-            .font(FontId::proportional(14.5))
-            .margin(egui::Margin::symmetric(2, 5))
+            .vertical_align(egui::Align::Center)
+            .font(font)
+            .margin(egui::Margin::symmetric(2, 1))
             .frame(egui::Frame::NONE)
             .lock_focus(true); // Tab verschiebt den Fokus nicht
-        let resp = ui.put(r.shrink(2.0), te);
+        let resp = ui.put(text_rect, te);
         ui.painter().rect_stroke(
             r.shrink(1.0),
             CornerRadius::same(2),
@@ -1210,7 +1531,7 @@ fn stats_row(
             GCol::Grade { col, .. } => calc::column_stats(course, col)
                 .0
                 .map(|v| (scale.format_avg(v), Align2::CENTER_CENTER)),
-            GCol::AreaAvg { area } => mean(
+            GCol::AreaAvg { area, .. } => mean(
                 students
                     .iter()
                     .filter_map(|s| calc::area_average(course, s.id, area, avg_halves))

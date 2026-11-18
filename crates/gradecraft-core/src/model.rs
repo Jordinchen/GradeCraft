@@ -305,7 +305,7 @@ impl Entry {
             _ => {}
         }
         match upper.as_str() {
-            "F" | "-" | "–" | "K" => Ok(Some(Entry::Fehlt)),
+            "F" | "-" | "–" | "−" | "K" => Ok(Some(Entry::Fehlt)),
             _ => scale.parse(t).map(|v| Some(Entry::Note(v))),
         }
     }
