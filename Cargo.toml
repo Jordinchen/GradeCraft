@@ -1,0 +1,18 @@
+[workspace]
+resolver = "2"
+members = ["crates/gradecraft-core", "crates/gradecraft"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["GradeCraft contributors"]
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+
+# Abhängigkeiten auch im Debug-Build optimieren (Argon2 und egui sind sonst sehr langsam)
+[profile.dev.package."*"]
+opt-level = 2

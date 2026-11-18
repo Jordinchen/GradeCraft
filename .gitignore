@@ -1,0 +1,5 @@
+/target
+/dist
+*.gcdb
+*.gcdb.tmp
+Sicherungen/
