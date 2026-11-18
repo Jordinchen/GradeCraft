@@ -313,6 +313,8 @@ impl Session {
                             scheme,
                             grades: Vec::new(),
                             finals: Vec::new(),
+                            oral: Vec::new(),
+                            oral_scheme: Default::default(),
                         });
                         self.touch(ctx);
                         self.open_view(View::Course(id));
@@ -352,7 +354,7 @@ impl Session {
                         self.checkpoint();
                         let id = self.db.alloc_id();
                         if let Some(a) = self.db.course_mut(*course).and_then(|c| c.scheme.areas.iter_mut().find(|a| a.id == *area)) {
-                            a.columns.push(Column { id, name: name.trim().to_string(), weight: *weight, half: *half });
+                            a.columns.push(Column { id, name: name.trim().to_string(), weight: *weight, half: *half, oral: None });
                         }
                         self.touch(ctx);
                         outcome = Outcome::Close;
@@ -699,6 +701,7 @@ impl Session {
                             ("Entf", "Eintrag löschen"),
                             ("Strg+Z / Strg+Y", "Rückgängig / Wiederholen"),
                             ("Strg+S / Strg+L", "Speichern / Sperren"),
+                            ("F9", "Noten verbergen / anzeigen (Sichtschutz)"),
                         ] {
                             ui.label(RichText::new(k).strong());
                             ui.label(v);

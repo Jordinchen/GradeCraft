@@ -252,6 +252,8 @@ impl GradeCraftApp {
             };
             theme::apply(ctx, self.cfg.theme);
         }
+        // Ohne Fenstermanager ist das Fenster nie „aktiv“ – Sichtschutz nur auf Wunsch
+        self.cfg.privacy_on_blur = opts.contains_key("privacy");
         if opts.get("view") == Some(&"start") {
             return;
         }
@@ -275,6 +277,7 @@ impl GradeCraftApp {
         match opts.get("tab").copied() {
             Some("h2") => s.course_tab = CourseTab::H2,
             Some("schema") => s.course_tab = CourseTab::Schema,
+            Some("oral") => s.course_tab = CourseTab::Oral,
             _ => {}
         }
         match opts.get("ribbon").copied() {
@@ -320,7 +323,15 @@ impl GradeCraftApp {
                     name: "Projekt".into(),
                     weight: 1.0,
                     half: gradecraft_core::Half::H2,
+                    oral: None,
                 });
+        }
+        if opts.contains_key("dist") {
+            let col = s.db.courses[0].scheme.areas[0].columns[0].id;
+            s.open_distribution(course, col);
+        }
+        if opts.contains_key("hide") {
+            s.privacy_hidden = true;
         }
         if let Some(sel) = opts.get("sel") {
             let (r, c) = sel.split_once(',').unwrap_or(("0", "0"));
@@ -707,10 +718,13 @@ impl eframe::App for GradeCraftApp {
             )
             .show_separator_line(false)
             .show(ui, |ui| s.title_bar(ui, cfg));
-        egui::Panel::top("tabs")
+        let tabs_bottom = egui::Panel::top("tabs")
             .frame(egui::Frame::new().fill(p.chrome))
             .show_separator_line(false)
-            .show(ui, |ui| s.tab_bar(ui));
+            .show(ui, |ui| s.tab_bar(ui))
+            .response
+            .rect
+            .bottom();
 
         if s.backstage.is_some() {
             s.backstage(ui, cfg);
@@ -780,7 +794,14 @@ impl eframe::App for GradeCraftApp {
                 });
         }
 
+        s.distribution_windows(&ctx);
         s.show_dialog(&ctx, cfg);
+
+        // Sichtschutz: Noten verdecken, wenn das Fenster nicht aktiv ist oder auf Wunsch
+        let unfocused = cfg.privacy_on_blur && ctx.input(|i| i.viewport().focused) == Some(false);
+        if unfocused || s.privacy_hidden {
+            privacy_overlay(&ctx, tabs_bottom, s, unfocused);
+        }
 
         match std::mem::replace(&mut s.event, SessionEvent::None) {
             SessionEvent::None => {}
@@ -805,4 +826,48 @@ impl eframe::App for GradeCraftApp {
         }
         self.cfg.save();
     }
+}
+
+/// Deckt alles unterhalb der Registerkarten ab (über Dialogen und Fenstern).
+fn privacy_overlay(ctx: &egui::Context, top: f32, s: &mut Session, unfocused: bool) {
+    let p = Palette::get(ctx);
+    let screen = ctx.content_rect();
+    let rect = egui::Rect::from_min_max(egui::pos2(screen.left(), top), screen.max);
+    egui::Area::new(egui::Id::new("privacy-overlay"))
+        .order(egui::Order::Tooltip)
+        .fixed_pos(rect.min)
+        .show(ctx, |ui| {
+            let (r, resp) = ui.allocate_exact_size(rect.size(), egui::Sense::click());
+            ui.painter().rect_filled(r, 0.0, p.canvas);
+            let c = r.center();
+            ui.painter().text(
+                c - egui::vec2(0.0, 40.0),
+                egui::Align2::CENTER_CENTER,
+                ic::EYE_SLASH,
+                egui::FontId::proportional(56.0),
+                p.accent_text,
+            );
+            ui.painter().text(
+                c + egui::vec2(0.0, 10.0),
+                egui::Align2::CENTER_CENTER,
+                "Noten ausgeblendet",
+                theme::bold(22.0),
+                p.text,
+            );
+            let hint = if unfocused {
+                "GradeCraft ist nicht das aktive Fenster. Zum Anzeigen ins Fenster klicken."
+            } else {
+                "Zum Anzeigen klicken oder F9 drücken."
+            };
+            ui.painter().text(
+                c + egui::vec2(0.0, 40.0),
+                egui::Align2::CENTER_CENTER,
+                hint,
+                egui::FontId::proportional(14.0),
+                p.text_weak,
+            );
+            if resp.clicked() && !unfocused {
+                s.privacy_hidden = false;
+            }
+        });
 }

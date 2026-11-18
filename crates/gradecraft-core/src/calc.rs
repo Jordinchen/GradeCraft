@@ -20,8 +20,8 @@ pub fn area_average(course: &Course, student: Id, area: Id, halves: &[Half]) -> 
             .filter(|c| halves.contains(&c.half))
             .filter_map(|c| {
                 course
-                    .grade(student, c.id)
-                    .and_then(|g| g.entry.value(course.scale))
+                    .effective_entry(student, c.id)
+                    .and_then(|(e, _)| e.value(course.scale))
                     .map(|v| (v, c.weight))
             }),
     )
@@ -66,10 +66,9 @@ pub fn suggestion(course: &Course, student: Id, period: Period) -> Option<f64> {
 /// Klassenstatistik einer Spalte: (Durchschnitt, Anzahl gezählter Noten).
 pub fn column_stats(course: &Course, column: Id) -> (Option<f64>, usize) {
     let vals: Vec<f64> = course
-        .grades
-        .iter()
-        .filter(|g| g.column == column)
-        .filter_map(|g| g.entry.value(course.scale))
+        .column_entries(column)
+        .into_iter()
+        .filter_map(|(_, e)| e.value(course.scale))
         .collect();
     let n = vals.len();
     (weighted_mean(vals.into_iter().map(|v| (v, 1.0))), n)
@@ -78,8 +77,8 @@ pub fn column_stats(course: &Course, column: Id) -> (Option<f64>, usize) {
 /// Notenspiegel einer Spalte: Anzahl je Notenstufe 1–6.
 pub fn distribution(course: &Course, column: Id) -> [usize; 6] {
     let mut d = [0; 6];
-    for g in course.grades.iter().filter(|g| g.column == column) {
-        if let Some(v) = g.entry.value(course.scale) {
+    for (_, e) in course.column_entries(column) {
+        if let Some(v) = e.value(course.scale) {
             d[(course.scale.level(v) - 1) as usize] += 1;
         }
     }
@@ -105,6 +104,8 @@ mod tests {
             scheme,
             grades: vec![],
             finals: vec![],
+            oral: vec![],
+            oral_scheme: Default::default(),
         });
         (db, id)
     }
@@ -178,5 +179,52 @@ mod tests {
     fn gewichtung() {
         assert_eq!(weighted_mean([(1.0, 2.0), (4.0, 1.0)]), Some(2.0));
         assert_eq!(weighted_mean([(1.0, 0.0)]), None);
+    }
+}
+
+#[cfg(test)]
+mod oral_tests {
+    use crate::model::*;
+    use chrono::NaiveDate;
+
+    #[test]
+    fn spalte_aus_stundennoten() {
+        let mut db = Database::new();
+        let scheme = db.default_scheme(2, 2);
+        let mut c = Course {
+            id: 1,
+            class_id: 0,
+            subject: "D".into(),
+            short: String::new(),
+            scale: crate::ScaleKind::Noten,
+            scheme,
+            grades: vec![],
+            finals: vec![],
+            oral: vec![],
+            oral_scheme: Default::default(),
+        };
+        let d = |day| NaiveDate::from_ymd_opt(2026, 9, day).unwrap();
+        let somi = c.scheme.areas[1].columns[0].id;
+        c.scheme.areas[1].columns[0].oral = Some(OralRange {
+            from: d(1),
+            to: d(30),
+        });
+        c.set_oral(7, d(2), Some(OralValue::Mark(OralMark::PlusPlus))); // 1
+        c.set_oral(7, d(9), Some(OralValue::Mark(OralMark::Neutral))); // 3
+        c.set_oral(7, d(9), Some(OralValue::Mark(OralMark::Plus))); // überschreibt: 2
+        c.set_oral(8, d(3), Some(OralValue::Note(4.0)));
+        // außerhalb des Zeitraums – zählt nicht
+        let outside = NaiveDate::from_ymd_opt(2026, 10, 5).unwrap();
+        c.set_oral(7, outside, Some(OralValue::Mark(OralMark::MinusMinus)));
+
+        assert_eq!(c.effective_entry(7, somi), Some((Entry::Note(1.5), true)));
+        assert_eq!(c.column_entries(somi).len(), 2);
+        assert_eq!(crate::calc::column_stats(&c, somi), (Some(2.75), 2));
+        // Manuelle Note hat Vorrang
+        c.set_grade(7, somi, Some(Entry::Note(2.0)));
+        assert_eq!(c.effective_entry(7, somi), Some((Entry::Note(2.0), false)));
+        // Löschen
+        c.set_oral(8, d(3), None);
+        assert_eq!(c.effective_entry(8, somi), None);
     }
 }

@@ -7,6 +7,7 @@ mod chrome;
 mod config;
 mod dialogs;
 mod grid;
+mod oral;
 mod reports;
 mod session;
 mod theme;

@@ -199,3 +199,41 @@ fn leistung_im_tabellenkopf_umbenennen() {
         "KA 1"
     );
 }
+
+#[test]
+fn stundenerfassung_per_klick() {
+    let mut s = session();
+    s.course_tab = crate::session::CourseTab::Oral;
+    let student = s.db.classes[0].students[0].id;
+    let date = s.oral_date;
+    let mut h = harness(s);
+    // Erste Karte: „++“ anklicken
+    h.get_all_by_label("++").next().unwrap().click();
+    h.run();
+    let c = &h.state().db.courses[0];
+    assert_eq!(
+        c.oral_on(student, date).map(|o| o.value),
+        Some(gradecraft_core::OralValue::Mark(
+            gradecraft_core::OralMark::PlusPlus
+        ))
+    );
+    // Nochmal klicken entfernt den Eintrag
+    h.get_all_by_label("++").next().unwrap().click();
+    h.run();
+    assert!(h.state().db.courses[0].oral_on(student, date).is_none());
+}
+
+#[test]
+fn notenspiegel_fenster() {
+    let s = session();
+    let (ka1, _, _) = first_cols(&s);
+    let course = s.db.courses[0].id;
+    let mut h = harness(s);
+    h.state_mut().open_distribution(course, ka1);
+    h.run();
+    // Fenster bleibt offen und wird bei erneutem Öffnen nicht doppelt angelegt
+    assert_eq!(h.state().dist_windows.len(), 1);
+    h.state_mut().open_distribution(course, ka1);
+    h.run();
+    assert_eq!(h.state().dist_windows.len(), 1);
+}

@@ -49,6 +49,8 @@ pub enum View {
 pub enum CourseTab {
     H1,
     H2,
+    /// Stundenerfassung (mündliche Mitarbeit)
+    Oral,
     Schema,
 }
 
@@ -102,6 +104,12 @@ pub struct Session {
     pub last_activity: f64,
     pub event: SessionEvent,
     pub close_after_save: bool,
+    /// Datum der Stundenerfassung
+    pub oral_date: chrono::NaiveDate,
+    /// Offene Notenspiegel-Fenster: (Fach, Leistung)
+    pub dist_windows: Vec<(Id, Id)>,
+    /// Noten manuell verborgen (Sichtschutz)
+    pub privacy_hidden: bool,
     /// Bitte an die App: jetzt nach Updates suchen.
     pub request_update_check: bool,
 }
@@ -138,6 +146,9 @@ impl Session {
             event: SessionEvent::None,
             close_after_save: false,
             request_update_check: false,
+            oral_date: crate::oral::today(),
+            dist_windows: Vec::new(),
+            privacy_hidden: false,
         }
     }
 
@@ -304,6 +315,9 @@ impl Session {
         }
         if lock {
             self.event = SessionEvent::Lock;
+        }
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F9)) {
+            self.privacy_hidden = !self.privacy_hidden;
         }
     }
 

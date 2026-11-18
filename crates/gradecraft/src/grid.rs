@@ -186,6 +186,7 @@ impl Session {
             for (tab, label) in [
                 (CourseTab::H1, "1. Halbjahr"),
                 (CourseTab::H2, "2. Halbjahr · Schuljahr"),
+                (CourseTab::Oral, "Mündlich"),
                 (CourseTab::Schema, "Bewertungsschema"),
             ] {
                 if pill(ui, label, self.course_tab == tab).clicked() {
@@ -199,6 +200,7 @@ impl Session {
         match self.course_tab {
             CourseTab::H1 => self.grade_grid(ui, cfg, course_id, Half::H1),
             CourseTab::H2 => self.grade_grid(ui, cfg, course_id, Half::H2),
+            CourseTab::Oral => self.oral_view(ui, cfg, course_id),
             CourseTab::Schema => self.scheme_editor(ui, course_id),
         }
     }
@@ -300,8 +302,8 @@ impl Session {
                                         );
                                     }
                                 });
-                            if cfg.show_stats {
-                                stats_row(
+                            if cfg.show_stats
+                                && let Some(col) = stats_row(
                                     ui,
                                     &course,
                                     &students,
@@ -309,7 +311,9 @@ impl Session {
                                     &avg_halves,
                                     period,
                                     total_w,
-                                );
+                                )
+                            {
+                                self.open_distribution(course_id, col);
                             }
                         });
                     });
@@ -1115,6 +1119,24 @@ impl Session {
                                     Stroke::NONE,
                                 ));
                             }
+                        } else if let Some((Entry::Note(v), true)) =
+                            course.effective_entry(s.id, column)
+                        {
+                            // Automatisch aus Stundennoten – kursiv in Akzentfarbe
+                            painter.text(
+                                r.center(),
+                                Align2::CENTER_CENTER,
+                                scale.format_avg(v),
+                                FontId::proportional(13.0),
+                                p.accent_text,
+                            );
+                            painter.text(
+                                r.right_top() + vec2(-3.0, 2.0),
+                                Align2::RIGHT_TOP,
+                                ic::CHAT_CIRCLE_TEXT,
+                                FontId::proportional(9.0),
+                                p.accent_text.gamma_multiply(0.7),
+                            );
                         }
                         if selected {
                             painter.rect_stroke(
@@ -1132,6 +1154,16 @@ impl Session {
                                 t.push_str(&format!("\n{} {}", ic::CHAT_TEXT, g.comment));
                             }
                             resp.on_hover_text(t)
+                        } else if let Some(range) = course
+                            .find_column(column)
+                            .and_then(|(_, c)| c.oral)
+                            .filter(|_| course.effective_entry(s.id, column).is_some())
+                        {
+                            resp.on_hover_text(format!(
+                                "Automatisch aus {} Stundennoten ({}).\nEine eingetragene Note hat Vorrang.",
+                                course.oral_in_range(s.id, range).count(),
+                                range.label()
+                            ))
                         } else {
                             resp
                         };
@@ -1568,9 +1600,10 @@ fn stats_row(
     avg_halves: &[Half],
     period: Period,
     total_w: f32,
-) {
+) -> Option<Id> {
     let p = Palette::get(ui.ctx());
     let scale = course.scale;
+    let mut clicked = None;
     let (rect, _) = ui.allocate_exact_size(vec2(total_w, ROW_H), Sense::hover());
     let painter = ui.painter_at(rect);
     painter.rect_filled(
@@ -1593,6 +1626,27 @@ fn stats_row(
     for col in cols {
         let r = Rect::from_min_size(pos2(x, rect.top()), vec2(col.width(), ROW_H));
         x += col.width();
+        // Schaltfläche „Notenspiegel“ rechts in jeder Leistungsspalte
+        if let GCol::Grade { col: column, .. } = *col {
+            let btn =
+                Rect::from_center_size(pos2(r.right() - 13.0, r.center().y), vec2(20.0, 20.0));
+            let resp = ui
+                .interact(btn, ui.id().with(("dist-btn", column)), Sense::CLICK)
+                .on_hover_text("Notenspiegel anzeigen");
+            if resp.hovered() {
+                painter.rect_filled(btn, CornerRadius::same(4), p.accent_soft);
+            }
+            painter.text(
+                btn.center(),
+                Align2::CENTER_CENTER,
+                ic::CHART_BAR,
+                FontId::proportional(14.0),
+                p.accent_text,
+            );
+            if resp.clicked() {
+                clicked = Some(column);
+            }
+        }
         let text = match *col {
             GCol::Name => Some(("Klassendurchschnitt".to_string(), Align2::LEFT_CENTER)),
             GCol::Grade { col, .. } => calc::column_stats(course, col)
@@ -1630,9 +1684,16 @@ fn stats_row(
             } else {
                 r.center()
             };
+            // In Leistungsspalten Platz für die Schaltfläche lassen
+            let pos = if matches!(col, GCol::Grade { .. }) {
+                pos - vec2(10.0, 0.0)
+            } else {
+                pos
+            };
             painter.text(pos, align, t, theme::bold(12.5), p.text_weak);
         }
     }
+    clicked
 }
 
 fn weight_summary(course: &Course) -> String {

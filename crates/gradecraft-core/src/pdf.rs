@@ -958,8 +958,11 @@ fn half_table(course: &Course, class: &SchoolClass, half: Half) -> Table {
             for c in a.columns.iter().filter(|c| c.half == half) {
                 row.push(
                     course
-                        .grade(s.id, c.id)
-                        .map(|g| entry_cell(scale, g.entry))
+                        .effective_entry(s.id, c.id)
+                        .map(|(e, auto)| {
+                            let cell = entry_cell(scale, e);
+                            if auto { cell.color(ACCENT) } else { cell }
+                        })
                         .unwrap_or_default(),
                 );
             }
@@ -1299,10 +1302,11 @@ pub fn student_sheets(
             for a in &c.scheme.areas {
                 for col in &a.columns {
                     let g = c.grade(s.id, col.id);
-                    let mut note = g
-                        .map(|g| entry_cell(scale, g.entry))
+                    let eff = c.effective_entry(s.id, col.id);
+                    let mut note = eff
+                        .map(|(e, _)| entry_cell(scale, e))
                         .unwrap_or_else(|| TCell::new("–").color(LIGHT_GREY));
-                    note.bold = g.is_some();
+                    note.bold = eff.is_some();
                     let remark = g
                         .map(|g| {
                             let mut r = match g.entry {
@@ -1317,7 +1321,14 @@ pub fn student_sheets(
                             }
                             r
                         })
-                        .unwrap_or_default();
+                        .unwrap_or_else(|| match (eff, col.oral) {
+                            (Some((_, true)), Some(range)) => format!(
+                                "aus {} Stundennoten ({})",
+                                c.oral_in_range(s.id, range).count(),
+                                range.label()
+                            ),
+                            _ => String::new(),
+                        });
                     t.rows.push(vec![
                         TCell::new(&a.name),
                         TCell::new(&col.name),
@@ -1445,7 +1456,7 @@ pub fn grade_distribution(
         .iter()
         .flat_map(|a| a.columns.iter().map(move |c| (a, c)))
         .filter(|(_, c)| column.is_none_or(|id| c.id == id))
-        .filter(|(_, c)| course.grades.iter().any(|g| g.column == c.id))
+        .filter(|(_, c)| !course.column_entries(c.id).is_empty())
         .collect();
     if cols.is_empty() {
         return Err("Für diese Auswahl sind noch keine Noten eingetragen.".into());

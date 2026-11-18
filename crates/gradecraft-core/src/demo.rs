@@ -75,6 +75,8 @@ pub fn demo_database() -> Database {
         scheme,
         grades: vec![],
         finals: vec![],
+        oral: vec![],
+        oral_scheme: Default::default(),
     };
     let cols: Vec<(Id, Half)> = course
         .scheme
@@ -126,6 +128,31 @@ pub fn demo_database() -> Database {
             reason: "Deutliche Leistungssteigerung im Verlauf des Halbjahres".into(),
         });
     }
+    // Stundenerfassung: SoMi 2 wird automatisch aus mündlichen Noten gebildet
+    {
+        use chrono::{Datelike, NaiveDate};
+        let start: i32 = db.school_years[0].name[..4].parse().unwrap_or(2026);
+        let from = NaiveDate::from_ymd_opt(start, 8, 1).unwrap();
+        let to = NaiveDate::from_ymd_opt(start + 1, 1, 31).unwrap();
+        let somi2 = course.scheme.areas[1].columns[1].id;
+        course.scheme.areas[1].columns[1].oral = Some(OralRange { from, to });
+        course.grades.retain(|g| g.column != somi2);
+        let mut lesson = NaiveDate::from_ymd_opt(start, 9, 1).unwrap();
+        for _ in 0..10 {
+            for (i, s) in students.iter().enumerate() {
+                if rng.next() < 0.45 {
+                    let level = (i as f64 * 0.37) % 3.4;
+                    let idx = ((level + (rng.next() - 0.5) * 2.0).round().clamp(0.0, 4.0)) as usize;
+                    course.set_oral(s.id, lesson, Some(OralValue::Mark(OralMark::ALL[idx])));
+                }
+            }
+            lesson += chrono::Duration::days(if lesson.weekday() == chrono::Weekday::Fri {
+                4
+            } else {
+                7
+            });
+        }
+    }
     db.courses.push(course);
 
     // Klasse IFK126, Punkte
@@ -158,6 +185,8 @@ pub fn demo_database() -> Database {
         scheme,
         grades: vec![],
         finals: vec![],
+        oral: vec![],
+        oral_scheme: Default::default(),
     };
     let cols: Vec<Id> = c2
         .scheme
@@ -191,6 +220,8 @@ pub fn demo_database() -> Database {
         scheme,
         grades: vec![],
         finals: vec![],
+        oral: vec![],
+        oral_scheme: Default::default(),
     });
     db
 }

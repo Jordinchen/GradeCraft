@@ -29,6 +29,9 @@ Die Bedienung orientiert sich an Microsoft Office: Ribbon-Menü, „Datei“-Bac
   - Schülerbogen (einzeln oder für die ganze Klasse), z. B. für Elterngespräche
   - Notenspiegel je Klassenarbeit, mit Unterschriftszeilen für Lehrkraft und Schulleitung
   - Kopfzeile mit Schule, Lehrkraft und Schullogo (unter „Datei → Optionen“), Datum und Unterschriftszeile
+- **Mündliche Noten (Stundenerfassung)**: pro Stunde per Klick ++ / + / o / − / −− oder eine Note vergeben. Eine verknüpfte Leistungsspalte (z. B. „SoMi 1“, Zeitraum frei wählbar) berechnet ihre Note automatisch daraus. Eine manuell eingetragene Note hat Vorrang.
+- **Notenspiegel als Fenster**: Symbol in der Zeile „Klassendurchschnitt“, aktualisiert sich live
+- **Sichtschutz**: Noten werden verdeckt, wenn GradeCraft nicht das aktive Fenster ist (z. B. beim Beamer-Teilen), oder sofort per F9
 - **Export** als CSV (Excel-kompatibel)
 - **Rückgängig/Wiederholen**, automatisches Speichern, Suche, Zoom, Hell-/Dunkelmodus
 - **Automatische Updates** über GitHub Releases (abschaltbar)

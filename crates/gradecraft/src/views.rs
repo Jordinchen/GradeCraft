@@ -420,6 +420,12 @@ impl Session {
         let Some(course) = self.db.course(course_id).cloned() else {
             return;
         };
+        let year_name = self
+            .db
+            .class(course.class_id)
+            .and_then(|c| self.db.year(c.year_id))
+            .map(|y| y.name.clone())
+            .unwrap_or_default();
         let mut scheme = course.scheme.clone();
         let original = scheme.clone();
         let grades_per_col = |col: Id| course.grades.iter().filter(|g| g.column == col).count();
@@ -507,6 +513,22 @@ impl Session {
                                             }
                                         }
                                     });
+                                    // Verknüpfung mit der Stundenerfassung
+                                    let mut linked = col.oral.is_some();
+                                    if ui
+                                        .checkbox(&mut linked, "Stundennoten")
+                                        .on_hover_text("Note automatisch aus den mündlichen Noten (Register „Mündlich“) des Zeitraums bilden")
+                                        .changed()
+                                    {
+                                        focus = true;
+                                        col.oral = linked.then(|| crate::oral::default_range(&year_name, col.half));
+                                    }
+                                    if let Some(range) = col.oral.as_mut() {
+                                        let (c1, r1) = crate::oral::date_edit(ui, egui::Id::new(("oral-from", id)), &mut range.from, 80.0);
+                                        ui.label("–");
+                                        let (c2, r2) = crate::oral::date_edit(ui, egui::Id::new(("oral-to", id)), &mut range.to, 80.0);
+                                        focus |= c1 || c2 || r1.gained_focus() || r2.gained_focus();
+                                    }
                                     let n = grades_per_col(id);
                                     if n > 0 {
                                         ui.label(RichText::new(format!("{n} Noten")).size(12.0).color(p.text_weak));

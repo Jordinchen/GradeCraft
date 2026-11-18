@@ -65,6 +65,10 @@ impl Session {
             {
                 self.redo(&ctx);
             }
+            ui.add_space(6.0);
+            if icon_button(ui, ic::EYE_SLASH, "Noten verbergen (F9)", true).clicked() {
+                self.privacy_hidden = !self.privacy_hidden;
+            }
 
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 ui.add_space(8.0);
@@ -267,6 +271,7 @@ impl Session {
                             for (tab, icon, label) in [
                                 (CourseTab::H1, ic::NUMBER_CIRCLE_ONE, "1. Halbjahr"),
                                 (CourseTab::H2, ic::NUMBER_CIRCLE_TWO, "2. Halbjahr"),
+                                (CourseTab::Oral, ic::CHAT_CIRCLE_TEXT, "Mündlich"),
                                 (CourseTab::Schema, ic::SCALES, "Bewertungs-\nschema"),
                             ] {
                                 if on {
@@ -281,7 +286,7 @@ impl Session {
                         });
                         group(ui, "Zeugnisnoten", |ui| {
                             let period = if self.course_tab == CourseTab::H2 { Period::Schuljahr } else { Period::Halbjahr };
-                            let on = course.is_some() && self.course_tab != CourseTab::Schema && !ro;
+                            let on = course.is_some() && matches!(self.course_tab, CourseTab::H1 | CourseTab::H2) && !ro;
                             if big_button(ui, ic::SEAL_CHECK, "Vorschläge\nbestätigen", on).on_hover_text(format!("Alle offenen Vorschläge für die {} übernehmen", period.label())).clicked()
                                 && let Some(c) = course {
                                     self.confirm_all(&ctx, c, period);
@@ -510,6 +515,21 @@ impl Session {
                             }
                             if big_toggle(ui, ic::TEXT_AA, "Vorname\nzuerst", cfg.first_name_first).clicked() {
                                 cfg.first_name_first = !cfg.first_name_first;
+                                cfg.save();
+                            }
+                        });
+                        group(ui, "Sichtschutz", |ui| {
+                            if big_toggle(ui, ic::EYE_SLASH, "Noten jetzt\nverbergen", self.privacy_hidden)
+                                .on_hover_text("Alle Noten sofort verdecken, z. B. vor dem Beamer-Teilen (F9)")
+                                .clicked()
+                            {
+                                self.privacy_hidden = !self.privacy_hidden;
+                            }
+                            if big_toggle(ui, ic::APP_WINDOW, "Bei Fenster-\nwechsel", cfg.privacy_on_blur)
+                                .on_hover_text("Noten verdecken, sobald GradeCraft nicht das aktive Fenster ist")
+                                .clicked()
+                            {
+                                cfg.privacy_on_blur = !cfg.privacy_on_blur;
                                 cfg.save();
                             }
                         });
@@ -782,7 +802,7 @@ impl Session {
         let half = match self.course_tab {
             CourseTab::H1 => gradecraft_core::Half::H1,
             CourseTab::H2 => gradecraft_core::Half::H2,
-            CourseTab::Schema => return None,
+            CourseTab::Schema | CourseTab::Oral => return None,
         };
         course
             .scheme

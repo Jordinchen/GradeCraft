@@ -18,6 +18,8 @@ pub struct AppConfig {
     pub first_name_first: bool,
     pub show_stats: bool,
     pub check_updates: bool,
+    /// Noten verdecken, wenn GradeCraft nicht das aktive Fenster ist
+    pub privacy_on_blur: bool,
 }
 
 impl Default for AppConfig {
@@ -31,6 +33,7 @@ impl Default for AppConfig {
             first_name_first: false,
             show_stats: true,
             check_updates: true,
+            privacy_on_blur: true,
         }
     }
 }

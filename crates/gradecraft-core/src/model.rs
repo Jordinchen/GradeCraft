@@ -157,6 +157,12 @@ pub struct Course {
     pub scheme: Scheme,
     pub grades: Vec<GradeRecord>,
     pub finals: Vec<FinalRecord>,
+    /// Mündliche Noten aus der Stundenerfassung.
+    #[serde(default)]
+    pub oral: Vec<OralEntry>,
+    /// Umrechnung der Kürzel ++ / + / o / − / −− in Noten.
+    #[serde(default)]
+    pub oral_scheme: OralScheme,
 }
 
 impl Course {
@@ -166,6 +172,90 @@ impl Course {
         } else {
             format!("{} ({})", self.subject, self.short)
         }
+    }
+
+    /// Note einer Zelle, wie sie zählt: manuelle Note, sonst automatisch aus
+    /// Stundennoten (zweiter Wert `true`).
+    pub fn effective_entry(&self, student: Id, column: Id) -> Option<(Entry, bool)> {
+        if let Some(g) = self.grade(student, column) {
+            return Some((g.entry, false));
+        }
+        let (_, col) = self.find_column(column)?;
+        let range = col.oral?;
+        self.oral_average(student, range)
+            .map(|v| (Entry::Note(v), true))
+    }
+
+    /// Stundennoten eines Schülers im Zeitraum.
+    pub fn oral_in_range(&self, student: Id, range: OralRange) -> impl Iterator<Item = &OralEntry> {
+        self.oral
+            .iter()
+            .filter(move |o| o.student == student && range.contains(o.date))
+    }
+
+    /// Durchschnitt der Stundennoten im Zeitraum.
+    pub fn oral_average(&self, student: Id, range: OralRange) -> Option<f64> {
+        crate::calc::weighted_mean(
+            self.oral_in_range(student, range)
+                .map(|o| (self.oral_scheme.value(o.value), 1.0)),
+        )
+    }
+
+    /// Stundennote eines Schülers an einem Tag (höchstens eine pro Tag).
+    pub fn oral_on(&self, student: Id, date: chrono::NaiveDate) -> Option<&OralEntry> {
+        self.oral
+            .iter()
+            .find(|o| o.student == student && o.date == date)
+    }
+
+    pub fn set_oral(&mut self, student: Id, date: chrono::NaiveDate, value: Option<OralValue>) {
+        let pos = self
+            .oral
+            .iter()
+            .position(|o| o.student == student && o.date == date);
+        match (pos, value) {
+            (Some(i), Some(v)) => self.oral[i].value = v,
+            (Some(i), None) => {
+                self.oral.remove(i);
+            }
+            (None, Some(v)) => self.oral.push(OralEntry {
+                student,
+                date,
+                value: v,
+                comment: String::new(),
+            }),
+            (None, None) => {}
+        }
+    }
+
+    /// Alle zählenden Einträge einer Spalte (manuell und automatisch).
+    pub fn column_entries(&self, column: Id) -> Vec<(Id, Entry)> {
+        let mut out: Vec<(Id, Entry)> = self
+            .grades
+            .iter()
+            .filter(|g| g.column == column)
+            .map(|g| (g.student, g.entry))
+            .collect();
+        if let Some((_, col)) = self.find_column(column)
+            && let Some(range) = col.oral
+        {
+            let mut students: Vec<Id> = self
+                .oral
+                .iter()
+                .filter(|o| range.contains(o.date))
+                .map(|o| o.student)
+                .collect();
+            students.sort_unstable();
+            students.dedup();
+            for s in students {
+                if !out.iter().any(|(id, _)| *id == s)
+                    && let Some(v) = self.oral_average(s, range)
+                {
+                    out.push((s, Entry::Note(v)));
+                }
+            }
+        }
+        out
     }
 
     pub fn grade(&self, student: Id, column: Id) -> Option<&GradeRecord> {
@@ -243,6 +333,113 @@ pub struct Column {
     pub name: String,
     pub weight: f64,
     pub half: Half,
+    /// Wenn gesetzt, ergibt sich die Note automatisch aus den Stundennoten
+    /// dieses Zeitraums (eine manuell eingetragene Note hat Vorrang).
+    #[serde(default)]
+    pub oral: Option<OralRange>,
+}
+
+/// Zeitraum, aus dem eine Spalte ihre Note aus Stundennoten bildet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OralRange {
+    pub from: chrono::NaiveDate,
+    pub to: chrono::NaiveDate,
+}
+
+impl OralRange {
+    pub fn contains(&self, d: chrono::NaiveDate) -> bool {
+        self.from <= d && d <= self.to
+    }
+
+    pub fn label(&self) -> String {
+        format!(
+            "{} – {}",
+            self.from.format("%d.%m.%Y"),
+            self.to.format("%d.%m.%Y")
+        )
+    }
+}
+
+/// Kürzel der Stundenerfassung.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum OralMark {
+    PlusPlus,
+    Plus,
+    Neutral,
+    Minus,
+    MinusMinus,
+}
+
+impl OralMark {
+    pub const ALL: [OralMark; 5] = [
+        OralMark::PlusPlus,
+        OralMark::Plus,
+        OralMark::Neutral,
+        OralMark::Minus,
+        OralMark::MinusMinus,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            OralMark::PlusPlus => "++",
+            OralMark::Plus => "+",
+            OralMark::Neutral => "o",
+            OralMark::Minus => "\u{2212}",
+            OralMark::MinusMinus => "\u{2212}\u{2212}",
+        }
+    }
+
+    pub fn index(self) -> usize {
+        OralMark::ALL.iter().position(|m| *m == self).unwrap()
+    }
+}
+
+/// Inhalt einer Stundennote: Kürzel oder direkt eine Note.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum OralValue {
+    Mark(OralMark),
+    Note(f64),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OralEntry {
+    pub student: Id,
+    pub date: chrono::NaiveDate,
+    pub value: OralValue,
+    #[serde(default)]
+    pub comment: String,
+}
+
+/// Notenwerte für ++, +, o, −, −− (je Fach einstellbar).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct OralScheme {
+    pub values: [f64; 5],
+}
+
+impl Default for OralScheme {
+    fn default() -> Self {
+        OralScheme {
+            values: [1.0, 2.0, 3.0, 4.0, 5.0],
+        }
+    }
+}
+
+impl OralScheme {
+    pub fn for_scale(scale: ScaleKind) -> Self {
+        match scale {
+            ScaleKind::Noten => OralScheme::default(),
+            ScaleKind::Punkte => OralScheme {
+                values: [14.0, 11.0, 8.0, 5.0, 2.0],
+            },
+        }
+    }
+
+    pub fn value(&self, v: OralValue) -> f64 {
+        match v {
+            OralValue::Mark(m) => self.values[m.index()],
+            OralValue::Note(n) => n,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -464,6 +661,7 @@ impl Database {
                 name: format!("KA {}", i + 1),
                 weight: 1.0,
                 half,
+                oral: None,
             });
         }
         areas.push(Area {
@@ -486,6 +684,7 @@ impl Database {
                 name: format!("SoMi {}", i + 1),
                 weight: 1.0,
                 half,
+                oral: None,
             });
         }
         areas.push(Area {
@@ -517,6 +716,7 @@ impl Database {
                         name: c.name.clone(),
                         weight: c.weight,
                         half: c.half,
+                        oral: None,
                     })
                     .collect(),
             })
@@ -577,6 +777,7 @@ impl Database {
         for course in self.courses.iter_mut().filter(|c| c.class_id == class) {
             course.grades.retain(|g| g.student != student);
             course.finals.retain(|f| f.student != student);
+            course.oral.retain(|o| o.student != student);
         }
     }
 
@@ -628,6 +829,8 @@ impl Database {
                         scheme,
                         grades: Vec::new(),
                         finals: Vec::new(),
+                        oral: Vec::new(),
+                        oral_scheme: Default::default(),
                     });
                 }
             }
