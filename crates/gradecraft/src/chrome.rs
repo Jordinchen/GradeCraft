@@ -415,6 +415,66 @@ impl Session {
                             }
                         });
                     }
+                    RibbonTab::Berichte => {
+                        use crate::reports::PdfKind;
+                        let sel_student = self.selected_student();
+                        let sel_column = self.selected_column();
+                        group(ui, "Fach", |ui| {
+                            if big_button(ui, ic::FILE_PDF, "Notenliste", course.is_some())
+                                .on_hover_text("Komplette Notentabelle beider Halbjahre mit Zeugnisnoten")
+                                .clicked()
+                                && let Some(c) = course {
+                                    self.export_pdf(&ctx, PdfKind::CourseList(c));
+                                }
+                            if big_button(ui, ic::CHART_BAR, "Noten-\nspiegel", course.is_some())
+                                .on_hover_text("Notenspiegel aller Leistungen mit Noten")
+                                .clicked()
+                                && let Some(c) = course {
+                                    self.export_pdf(&ctx, PdfKind::Distribution(c, None));
+                                }
+                            stack(ui, |ui| {
+                                if small_button(ui, ic::CHART_BAR, "Nur ausgewählte Leistung", course.is_some() && sel_column.is_some())
+                                    .on_hover_text("Zuerst eine Zelle der gewünschten Leistung auswählen")
+                                    .clicked()
+                                    && let Some(c) = course {
+                                        self.export_pdf(&ctx, PdfKind::Distribution(c, sel_column));
+                                    }
+                                if small_button(ui, ic::FILE_CSV, "Notenliste als CSV", course.is_some()).clicked()
+                                    && let Some(c) = course {
+                                        self.export_course_csv(&ctx, c);
+                                    }
+                            });
+                        });
+                        group(ui, "Klasse", |ui| {
+                            if big_button(ui, ic::USERS_THREE, "Konferenz\nHalbjahr", class.is_some()).clicked()
+                                && let Some(c) = class {
+                                    self.export_pdf(&ctx, PdfKind::Conference(c, Period::Halbjahr));
+                                }
+                            if big_button(ui, ic::USERS_THREE, "Konferenz\nSchuljahr", class.is_some()).clicked()
+                                && let Some(c) = class {
+                                    self.export_pdf(&ctx, PdfKind::Conference(c, Period::Schuljahr));
+                                }
+                        });
+                        group(ui, "Schülerbogen", |ui| {
+                            if big_button(ui, ic::IDENTIFICATION_CARD, "Ausgewählter\nSchüler", class.is_some() && sel_student.is_some())
+                                .on_hover_text("Zuerst eine Zeile in der Notentabelle auswählen")
+                                .clicked()
+                                && let Some(c) = class {
+                                    self.export_pdf(&ctx, PdfKind::Sheets { class: c, student: sel_student, course: None });
+                                }
+                            if big_button(ui, ic::FILES, "Ganze\nKlasse", class.is_some())
+                                .on_hover_text("Ein Schülerbogen pro Schüler, alle Fächer")
+                                .clicked()
+                                && let Some(c) = class {
+                                    self.export_pdf(&ctx, PdfKind::Sheets { class: c, student: None, course: None });
+                                }
+                        });
+                        group(ui, "Einstellungen", |ui| {
+                            if big_button(ui, ic::GEAR, "Kopfzeile\n& Logo", true).clicked() {
+                                self.backstage = Some(BackstagePage::Settings);
+                            }
+                        });
+                    }
                     RibbonTab::Ansicht => {
                         group(ui, "Design", |ui| {
                             for (choice, icon) in [(ThemeChoice::Hell, ic::SUN), (ThemeChoice::Dunkel, ic::MOON), (ThemeChoice::System, ic::CIRCLE_HALF)] {
@@ -713,6 +773,24 @@ impl Session {
                 }
             });
         });
+    }
+
+    /// ID der Leistung (Spalte) der ausgewählten Tabellenzelle.
+    pub fn selected_column(&self) -> Option<u64> {
+        let (_, ecol) = self.grid.sel?;
+        let course = self.db.course(self.current_course()?)?;
+        let half = match self.course_tab {
+            CourseTab::H1 => gradecraft_core::Half::H1,
+            CourseTab::H2 => gradecraft_core::Half::H2,
+            CourseTab::Schema => return None,
+        };
+        course
+            .scheme
+            .areas
+            .iter()
+            .flat_map(|a| a.columns.iter().filter(|c| c.half == half))
+            .nth(ecol)
+            .map(|c| c.id)
     }
 
     /// ID des Schülers in der ausgewählten Tabellenzeile.

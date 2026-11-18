@@ -733,6 +733,18 @@ impl Session {
                     ui.label(format!("Version {}", env!("CARGO_PKG_VERSION")));
                     ui.label("Notenverwaltung für Lehrkräfte – lokal, verschlüsselt, in Rust geschrieben.");
                     ui.hyperlink_to("Projektseite auf GitHub", format!("https://github.com/{}", crate::updater::UPDATE_REPO));
+                    ui.add_space(6.0);
+                    ui.label(
+                        RichText::new(
+                            "GradeCraft ist freie Software: Du kannst sie unter den Bedingungen der GNU General Public License, \
+                             Version 3 oder (nach deiner Wahl) jeder späteren Version, weitergeben und/oder verändern. \
+                             GradeCraft wird OHNE JEDE GEWÄHRLEISTUNG bereitgestellt.",
+                        )
+                        .size(12.0)
+                        .color(p.text_weak),
+                    );
+                    ui.hyperlink_to("Lizenztext (GPL-3.0)", "https://www.gnu.org/licenses/gpl-3.0.html");
+                    ui.label(RichText::new("Schrift in PDF-Dokumenten: Inter (SIL Open Font License 1.1). Icons: Phosphor (MIT).").size(12.0).color(p.text_weak));
                     if primary_button(ui, "OK").clicked() {
                         outcome = Outcome::Close;
                     }

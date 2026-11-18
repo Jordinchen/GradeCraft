@@ -23,6 +23,12 @@ Die Bedienung orientiert sich an Microsoft Office: Ribbon-Menü, „Datei“-Bac
   - aus Halbjahresnote und 2. Halbjahr gewichtet (z. B. 1:1)
   - oder aus allen Einzelnoten des Jahres
 - **Vorlagen** für Bewertungsschemata, **Schuljahreswechsel** mit Übernahme der Klassen (9b → 10b) und **Archiv** (schreibgeschützt)
+- **PDF-Berichte** (Register „Berichte“):
+  - Notenliste je Fach mit beiden Halbjahren, Zeugnisnoten und Begründungen pädagogischer Noten
+  - Konferenzübersicht je Klasse (Halbjahr oder Schuljahr), Defizite markiert
+  - Schülerbogen (einzeln oder für die ganze Klasse), z. B. für Elterngespräche
+  - Notenspiegel je Klassenarbeit, mit Unterschriftszeilen für Lehrkraft und Schulleitung
+  - Kopfzeile mit Schule, Lehrkraft und Schullogo (unter „Datei → Optionen“), Datum und Unterschriftszeile
 - **Export** als CSV (Excel-kompatibel)
 - **Rückgängig/Wiederholen**, automatisches Speichern, Suche, Zoom, Hell-/Dunkelmodus
 - **Automatische Updates** über GitHub Releases (abschaltbar)
@@ -32,6 +38,7 @@ Die Bedienung orientiert sich an Microsoft Office: Ribbon-Menü, „Datei“-Bac
 - Alle Daten liegen in **einer verschlüsselten Datei** (`.gcdb`): AES-256-GCM, Schlüssel per Argon2id aus dem Passwort abgeleitet.
 - Keine Cloud und keine Telemetrie. Einzige Netzwerkverbindung ist die abschaltbare Update-Prüfung bei GitHub, ohne Datenübertragung.
 - Automatische Sperre nach Inaktivität (Standard: 15 Minuten).
+- PDF- und CSV-Exporte sind **nicht** verschlüsselt. Sie tragen den Hinweis „vertraulich – enthält personenbezogene Daten“.
 - Verschlüsselte Sicherungskopien (Standard: die letzten 10) im Unterordner `Sicherungen`.
 - Speicherort frei wählbar:
   - Dokumente-Ordner
@@ -47,6 +54,11 @@ Unter [Releases](https://github.com/jordinchen/gradecraft/releases) liegen zwei 
 - `GradeCraft-x.y.z-portable.exe`: läuft ohne Installation.
 
 Beim Start sucht GradeCraft nach neuen Versionen und kann sich per Klick aktualisieren.
+
+## Lizenz
+
+GradeCraft ist freie Software unter der [GNU General Public License v3.0](LICENSE) (oder einer späteren Version).
+Die in PDF-Dokumenten eingebettete Schrift Inter steht unter der SIL Open Font License 1.1 (`crates/gradecraft-core/assets/fonts/OFL.txt`).
 
 ## Entwicklung
 

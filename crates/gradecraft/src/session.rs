@@ -12,15 +12,17 @@ pub enum RibbonTab {
     Start,
     Klasse,
     Bewertung,
+    Berichte,
     Ansicht,
     Hilfe,
 }
 
 impl RibbonTab {
-    pub const ALL: [RibbonTab; 5] = [
+    pub const ALL: [RibbonTab; 6] = [
         RibbonTab::Start,
         RibbonTab::Klasse,
         RibbonTab::Bewertung,
+        RibbonTab::Berichte,
         RibbonTab::Ansicht,
         RibbonTab::Hilfe,
     ];
@@ -29,6 +31,7 @@ impl RibbonTab {
             RibbonTab::Start => "Start",
             RibbonTab::Klasse => "Klasse",
             RibbonTab::Bewertung => "Bewertung",
+            RibbonTab::Berichte => "Berichte",
             RibbonTab::Ansicht => "Ansicht",
             RibbonTab::Hilfe => "Hilfe",
         }

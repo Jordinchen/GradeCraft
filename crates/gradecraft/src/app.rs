@@ -269,6 +269,7 @@ impl GradeCraftApp {
             "welcome" => {}
             "backstage" => s.backstage = Some(BackstagePage::Info),
             "years" => s.backstage = Some(BackstagePage::Years),
+            "options" => s.backstage = Some(BackstagePage::Settings),
             _ => s.open_view(View::Course(course)),
         }
         match opts.get("tab").copied() {
@@ -280,6 +281,7 @@ impl GradeCraftApp {
             Some("klasse") => s.tab = RibbonTab::Klasse,
             Some("bewertung") => s.tab = RibbonTab::Bewertung,
             Some("ansicht") => s.tab = RibbonTab::Ansicht,
+            Some("berichte") => s.tab = RibbonTab::Berichte,
             _ => {}
         }
         if opts.get("dialog") == Some(&"final") {
@@ -296,6 +298,29 @@ impl GradeCraftApp {
                 class,
                 text: "Nachname;Vorname;Geschlecht\nMüller;Anna;w\nSchmidt;Ben;m".into(),
             });
+        }
+        if opts.get("variant") == Some(&"praxis") {
+            let id = s.db.alloc_id();
+            let c = s.db.course_mut(course).unwrap();
+            for a in &mut c.scheme.areas {
+                a.weight = 2.0;
+                a.columns.retain(|c| c.half == gradecraft_core::Half::H1);
+            }
+            c.scheme.areas.push(gradecraft_core::Area {
+                id,
+                name: "Praxis".into(),
+                weight: 1.0,
+                columns: vec![],
+            });
+            let cid = s.db.alloc_id();
+            s.db.course_mut(course).unwrap().scheme.areas[2]
+                .columns
+                .push(gradecraft_core::Column {
+                    id: cid,
+                    name: "Projekt".into(),
+                    weight: 1.0,
+                    half: gradecraft_core::Half::H2,
+                });
         }
         if let Some(sel) = opts.get("sel") {
             let (r, c) = sel.split_once(',').unwrap_or(("0", "0"));

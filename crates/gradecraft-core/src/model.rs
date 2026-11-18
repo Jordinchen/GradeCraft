@@ -22,11 +22,18 @@ pub struct Database {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct DbSettings {
     /// Anzahl aufbewahrter Sicherungskopien.
     pub backup_count: usize,
     /// Automatisch sperren nach so vielen Minuten Inaktivität (0 = nie).
     pub auto_lock_minutes: u32,
+    /// Für den Kopf von PDF-Dokumenten.
+    pub school_name: String,
+    pub teacher_name: String,
+    /// Schullogo (PNG oder JPEG), Base64 in der Datei.
+    #[serde(with = "base64_opt")]
+    pub logo: Option<Vec<u8>>,
 }
 
 impl Default for DbSettings {
@@ -34,7 +41,30 @@ impl Default for DbSettings {
         Self {
             backup_count: 10,
             auto_lock_minutes: 15,
+            school_name: String::new(),
+            teacher_name: String::new(),
+            logo: None,
         }
+    }
+}
+
+/// Binärdaten kompakt als Base64 statt als Zahlenliste speichern.
+mod base64_opt {
+    use base64::Engine;
+    use base64::engine::general_purpose::STANDARD;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(v: &Option<Vec<u8>>, s: S) -> Result<S::Ok, S::Error> {
+        match v {
+            Some(b) => s.serialize_some(&STANDARD.encode(b)),
+            None => s.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<u8>>, D::Error> {
+        let s: Option<String> = Option::deserialize(d)?;
+        s.map(|s| STANDARD.decode(s).map_err(serde::de::Error::custom))
+            .transpose()
     }
 }
 

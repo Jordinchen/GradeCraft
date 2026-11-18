@@ -102,6 +102,9 @@ fn columns(ui: &egui::Ui, course: &Course, half: Half) -> Vec<GCol> {
             .x
     };
     for a in &course.scheme.areas {
+        if area_hidden(course, a, half) {
+            continue;
+        }
         let mut band_w = 0.0;
         for c in a.columns.iter().filter(|c| c.half == half) {
             let w = (text_w(c.name.clone(), FontId::proportional(12.0)) + 18.0).clamp(66.0, 220.0);
@@ -128,6 +131,13 @@ fn columns(ui: &egui::Ui, course: &Course, half: Half) -> Vec<GCol> {
     }
     cols.extend([GCol::Total, GCol::Suggest, GCol::Final]);
     cols
+}
+
+/// Bereiche ohne Leistungen in diesem Halbjahr werden ausgeblendet –
+/// außer wenn die Schuljahresnote aus allen Einzelnoten gebildet wird.
+fn area_hidden(course: &Course, area: &gradecraft_core::Area, half: Half) -> bool {
+    let all_year = half == Half::H2 && course.scheme.year_mode == YearMode::AlleNoten;
+    !all_year && !area.columns.iter().any(|c| c.half == half)
 }
 
 fn halves_for_avg(course: &Course, half: Half) -> Vec<Half> {
@@ -306,6 +316,43 @@ impl Session {
             });
 
         ui.add_space(6.0);
+        let hidden: Vec<(Id, String)> = course
+            .scheme
+            .areas
+            .iter()
+            .filter(|a| area_hidden(&course, a, half))
+            .map(|a| (a.id, a.name.clone()))
+            .collect();
+        if !hidden.is_empty() {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(
+                    RichText::new(format!("{} Ohne Leistungen im {}:", ic::INFO, half.label()))
+                        .size(12.5)
+                        .color(p.text_weak),
+                );
+                for (area, name) in hidden {
+                    let btn = egui::Button::new(
+                        RichText::new(format!("{} {name}", ic::PLUS))
+                            .size(12.5)
+                            .color(p.accent_text),
+                    );
+                    if !ro
+                        && ui
+                            .add(btn)
+                            .on_hover_text("Leistung in diesem Bereich hinzufügen")
+                            .clicked()
+                    {
+                        self.dialog = Some(Dialog::AddColumn {
+                            course: course_id,
+                            area,
+                            name: "Leistung 1".into(),
+                            weight: 1.0,
+                            half,
+                        });
+                    }
+                }
+            });
+        }
         ui.horizontal_wrapped(|ui| {
             let t = |s: &str| RichText::new(s).size(12.0).color(p.text_weak);
             ui.label(t(&format!("{} Eingabe: {}", ic::KEYBOARD, course.scale.input_hint())));
@@ -461,6 +508,10 @@ impl Session {
         let ctx = ui.ctx().clone();
         let p = Palette::get(&ctx);
         let (rect, _) = ui.allocate_exact_size(vec2(total_w, HEAD_H), Sense::hover());
+        // Eigener Unterbereich: Eingabefelder (ui.put) dürfen den Layout-Cursor
+        // der Tabelle nicht verschieben – sonst überlappen Kopf und Zeilen.
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).id_salt("grid-head"));
+        let ui = &mut child;
         let painter = ui.painter_at(rect);
         painter.rect_filled(
             rect,
@@ -840,6 +891,14 @@ impl Session {
             {
                 self.dialog = Some(Dialog::confirm_delete_column(&self.db, cid, col));
             }
+            ui.separator();
+            if ui
+                .button(format!("{} Notenspiegel als PDF", ic::CHART_BAR))
+                .clicked()
+            {
+                let ctx = ui.ctx().clone();
+                self.export_pdf(&ctx, crate::reports::PdfKind::Distribution(cid, Some(col)));
+            }
         });
     }
 
@@ -959,6 +1018,14 @@ impl Session {
         let p = Palette::get(&ctx);
         let scale = course.scale;
         let (rect, _) = ui.allocate_exact_size(vec2(total_w, ROW_H), Sense::hover());
+        // Eigener Unterbereich: Eingabefelder (ui.put) dürfen den Layout-Cursor
+        // der Tabelle nicht verschieben – sonst überlappen Kopf und Zeilen.
+        let mut child = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(rect)
+                .id_salt(("grid-row", s.id)),
+        );
+        let ui = &mut child;
         if !ui.is_rect_visible(rect)
             && !(self.grid.scroll_to_sel && self.grid.sel.is_some_and(|(r, _)| r == row))
         {

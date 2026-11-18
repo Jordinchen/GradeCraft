@@ -27,6 +27,7 @@ PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 OutputDir=..\dist
 OutputBaseFilename=GradeCraft-{#AppVersion}-setup
+LicenseFile=..\LICENSE
 SetupIconFile=..\crates\gradecraft\assets\icon.ico
 UninstallDisplayIcon={app}\GradeCraft.exe
 Compression=lzma2/max
@@ -47,6 +48,8 @@ Name: "assoc"; Description: "GradeCraft-Dateien (.gcdb) mit GradeCraft öffnen";
 
 [Files]
 Source: "{#SourceExe}"; DestDir: "{app}"; DestName: "GradeCraft.exe"; Flags: ignoreversion
+
+Source: "..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\GradeCraft"; Filename: "{app}\GradeCraft.exe"

@@ -180,6 +180,7 @@ impl Session {
             return;
         }
         let mut delete: Option<Id> = None;
+        let mut pdf_for: Option<Id> = None;
         let mut moved: Option<(usize, usize)> = None;
         card(ui, |ui| {
             egui::ScrollArea::vertical()
@@ -238,6 +239,13 @@ impl Session {
                                         });
                                 });
                                 ui.horizontal(|ui| {
+                                    if ui
+                                        .small_button(ic::FILE_PDF)
+                                        .on_hover_text("Schülerbogen als PDF")
+                                        .clicked()
+                                    {
+                                        pdf_for = Some(s.id);
+                                    }
                                     if !ro {
                                         if ui
                                             .small_button(ic::ARROW_UP)
@@ -287,6 +295,16 @@ impl Session {
                 c.students.swap(a, b);
             }
             self.touch(&ctx);
+        }
+        if let Some(sid) = pdf_for {
+            self.export_pdf(
+                &ctx,
+                crate::reports::PdfKind::Sheets {
+                    class: class_id,
+                    student: Some(sid),
+                    course: None,
+                },
+            );
         }
         if let Some(sid) = delete {
             let name = students

@@ -249,6 +249,73 @@ impl Session {
         card(ui, |ui| {
             ui.label(RichText::new(format!("{} Exporte sind nicht verschlüsselt. Bitte nur auf dienstlich zugelassenen Geräten speichern.", ic::WARNING)).color(p.warn));
             ui.add_space(8.0);
+            section_title(ui, "PDF-Berichte");
+            let classes: Vec<(u64, String)> = self
+                .db
+                .classes_of_year(self.year)
+                .map(|c| (c.id, c.name.clone()))
+                .collect();
+            if classes.is_empty() {
+                ui.label(RichText::new("Keine Klassen im gewählten Schuljahr.").color(p.text_weak));
+            }
+            for (cid, cname) in classes {
+                use crate::reports::PdfKind;
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new(format!("{} Klasse {cname}", ic::CHALKBOARD_TEACHER)).strong(),
+                );
+                ui.horizontal_wrapped(|ui| {
+                    if ui
+                        .button(format!("{} Konferenz Halbjahr", ic::USERS_THREE))
+                        .clicked()
+                    {
+                        self.export_pdf(
+                            &ctx,
+                            PdfKind::Conference(cid, gradecraft_core::Period::Halbjahr),
+                        );
+                    }
+                    if ui
+                        .button(format!("{} Konferenz Schuljahr", ic::USERS_THREE))
+                        .clicked()
+                    {
+                        self.export_pdf(
+                            &ctx,
+                            PdfKind::Conference(cid, gradecraft_core::Period::Schuljahr),
+                        );
+                    }
+                    if ui.button(format!("{} Schülerbögen", ic::FILES)).clicked() {
+                        self.export_pdf(
+                            &ctx,
+                            PdfKind::Sheets {
+                                class: cid,
+                                student: None,
+                                course: None,
+                            },
+                        );
+                    }
+                });
+                let courses: Vec<(u64, String)> = self
+                    .db
+                    .courses_of_class(cid)
+                    .map(|k| (k.id, k.title()))
+                    .collect();
+                for (id, title) in courses {
+                    ui.horizontal(|ui| {
+                        ui.add_space(18.0);
+                        ui.label(format!("{} {title}", ic::BOOK_OPEN));
+                        if ui.button(format!("{} Notenliste", ic::FILE_PDF)).clicked() {
+                            self.export_pdf(&ctx, PdfKind::CourseList(id));
+                        }
+                        if ui
+                            .button(format!("{} Notenspiegel", ic::CHART_BAR))
+                            .clicked()
+                        {
+                            self.export_pdf(&ctx, PdfKind::Distribution(id, None));
+                        }
+                    });
+                }
+            }
+            ui.add_space(12.0);
             section_title(ui, "Notenlisten als CSV (Excel)");
             let courses: Vec<(u64, String)> = self
                 .db
@@ -270,8 +337,6 @@ impl Session {
                     }
                 });
             }
-            ui.add_space(8.0);
-            ui.label(RichText::new("PDF-Notenlisten und Konferenzübersicht folgen in einer der nächsten Versionen.").size(12.0).color(p.text_weak));
         });
     }
 
@@ -476,8 +541,96 @@ impl Session {
                 self.request_update_check = true;
             }
         });
-        if s.auto_lock_minutes != self.db.settings.auto_lock_minutes
-            || s.backup_count != self.db.settings.backup_count
+        ui.add_space(12.0);
+        let mut focus = false;
+        card(ui, |ui| {
+            section_title(ui, "Kopfzeile der PDF-Dokumente");
+            egui::Grid::new("pdf-head")
+                .num_columns(2)
+                .spacing([12.0, 8.0])
+                .show(ui, |ui| {
+                    ui.label("Schule");
+                    focus |= ui
+                        .add(
+                            egui::TextEdit::singleline(&mut s.school_name)
+                                .hint_text("z. B. Berufskolleg Musterstadt")
+                                .desired_width(320.0),
+                        )
+                        .gained_focus();
+                    ui.end_row();
+                    ui.label("Lehrkraft");
+                    focus |= ui
+                        .add(
+                            egui::TextEdit::singleline(&mut s.teacher_name)
+                                .hint_text("z. B. Frau Muster / StR Muster")
+                                .desired_width(320.0),
+                        )
+                        .gained_focus();
+                    ui.end_row();
+                    ui.label("Logo");
+                    ui.horizontal(|ui| {
+                        match &s.logo {
+                            Some(l) => {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "{} Logo hinterlegt ({:.0} KB)",
+                                        ic::IMAGE,
+                                        l.len() as f64 / 1024.0
+                                    ))
+                                    .color(p.good),
+                                );
+                            }
+                            None => {
+                                ui.label(RichText::new("kein Logo").color(p.text_weak));
+                            }
+                        }
+                        if ui
+                            .button(format!("{} Bild wählen …", ic::FOLDER_OPEN))
+                            .clicked()
+                            && let Some(path) = rfd::FileDialog::new()
+                                .add_filter("Bild (PNG, JPEG)", &["png", "jpg", "jpeg"])
+                                .pick_file()
+                        {
+                            match std::fs::read(&path) {
+                                Ok(data) if data.len() > 2 * 1024 * 1024 => {
+                                    self.notify(&ctx, "Das Bild ist zu groß (max. 2 MB).", true);
+                                }
+                                Ok(data) => match gradecraft_core::pdf::validate_logo(&data) {
+                                    Ok(()) => {
+                                        focus = true;
+                                        s.logo = Some(data);
+                                    }
+                                    Err(e) => self.notify(&ctx, &e, true),
+                                },
+                                Err(e) => {
+                                    self.notify(&ctx, &format!("Bild nicht lesbar: {e}"), true)
+                                }
+                            }
+                        }
+                        if s.logo.is_some()
+                            && ui.button(format!("{} Entfernen", ic::TRASH)).clicked()
+                        {
+                            focus = true;
+                            s.logo = None;
+                        }
+                    });
+                    ui.end_row();
+                });
+            ui.label(
+                RichText::new("Erscheint oben auf jeder Seite. Datum und Unterschriftszeile werden automatisch ergänzt. Das Logo wird verschlüsselt in der Notendatei gespeichert.")
+                    .size(12.0)
+                    .color(p.text_weak),
+            );
+        });
+        if focus {
+            self.checkpoint();
+        }
+        let old = &self.db.settings;
+        if s.auto_lock_minutes != old.auto_lock_minutes
+            || s.backup_count != old.backup_count
+            || s.school_name != old.school_name
+            || s.teacher_name != old.teacher_name
+            || s.logo != old.logo
         {
             self.db.settings = s;
             self.touch(&ctx);
