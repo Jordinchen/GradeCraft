@@ -19,11 +19,11 @@ fn session() -> Session {
     s
 }
 
+/// Eindeutiger Zähler – die Uhr ist unter Windows zu grob, parallele
+/// Tests bekämen sonst denselben Ordner.
 fn rand_suffix() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos() as u64
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 fn harness(s: Session) -> Harness<'static, Session> {
