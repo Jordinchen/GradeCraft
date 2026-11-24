@@ -30,6 +30,7 @@ Die Bedienung orientiert sich an Microsoft Office: Ribbon-Menü, „Datei“-Bac
   - Notenspiegel je Klassenarbeit, mit Unterschriftszeilen für Lehrkraft und Schulleitung
   - Kopfzeile mit Schule, Lehrkraft und Schullogo (unter „Datei → Optionen“), Datum und Unterschriftszeile
 - **Mündliche Noten (Stundenerfassung)**: pro Stunde per Klick ++ / + / o / − / −− oder eine Note vergeben. Eine verknüpfte Leistungsspalte (z. B. „SoMi 1“, Zeitraum frei wählbar) berechnet ihre Note automatisch daraus. Eine manuell eingetragene Note hat Vorrang.
+- **Notenbesprechung**: eigenes Fenster nur mit den Noten eines Schülers (Leistungen mit Bezeichnung, Durchschnitte, optional Vorschlag und Zeugnisnote), z. B. für den Beamer. Öffnen per Doppelklick auf den Namen.
 - **Notenspiegel als Fenster**: Symbol in der Zeile „Klassendurchschnitt“, aktualisiert sich live
 - **Sichtschutz**: Noten werden verdeckt, wenn GradeCraft nicht das aktive Fenster ist (z. B. beim Beamer-Teilen), oder sofort per F9
 - **Export** als CSV (Excel-kompatibel)
@@ -41,6 +42,9 @@ Die Bedienung orientiert sich an Microsoft Office: Ribbon-Menü, „Datei“-Bac
 - Alle Daten liegen in **einer verschlüsselten Datei** (`.gcdb`): AES-256-GCM, Schlüssel per Argon2id aus dem Passwort abgeleitet.
 - Keine Cloud und keine Telemetrie. Einzige Netzwerkverbindung ist die abschaltbare Update-Prüfung bei GitHub, ohne Datenübertragung.
 - Automatische Sperre nach Inaktivität (Standard: 15 Minuten).
+- Beim Passwortwechsel werden Sicherungskopien auf das neue Passwort umgestellt.
+- CSV-Exporte sind gegen Formel-Einschleusung in Excel geschützt.
+- Release-Builds verwenden fest angegebene Versionen aller GitHub-Actions (Commit-Kennungen).
 - PDF- und CSV-Exporte sind **nicht** verschlüsselt. Sie tragen den Hinweis „vertraulich – enthält personenbezogene Daten“.
 - Verschlüsselte Sicherungskopien (Standard: die letzten 10) im Unterordner `Sicherungen`.
 - Speicherort frei wählbar:

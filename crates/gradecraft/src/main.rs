@@ -9,6 +9,7 @@ mod dialogs;
 mod grid;
 mod oral;
 mod reports;
+mod review;
 mod session;
 mod theme;
 mod updater;

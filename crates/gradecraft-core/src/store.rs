@@ -48,6 +48,12 @@ struct KdfParams {
     p_cost: u32,
 }
 
+impl KdfParams {
+    fn tuple(&self) -> (u32, u32, u32) {
+        (self.m_cost, self.t_cost, self.p_cost)
+    }
+}
+
 impl Default for KdfParams {
     fn default() -> Self {
         // 64 MiB, 3 Durchläufe – auch auf älteren Dienstlaptops < 1 s.
@@ -82,6 +88,63 @@ fn derive_key(
     Ok(key)
 }
 
+/// Liest und prüft den Dateikopf: (KDF-Parameter, Salt).
+fn read_header(bytes: &[u8]) -> Result<(KdfParams, [u8; 16]), StoreError> {
+    if bytes.len() < HEADER_LEN || &bytes[..8] != MAGIC {
+        return Err(StoreError::Format);
+    }
+    if bytes[8] > FILE_VERSION {
+        return Err(StoreError::TooNew);
+    }
+    let u32_at = |i: usize| u32::from_le_bytes(bytes[i..i + 4].try_into().unwrap());
+    let params = KdfParams {
+        m_cost: u32_at(9),
+        t_cost: u32_at(13),
+        p_cost: u32_at(17),
+    };
+    // Grenzen gegen manipulierte Dateien, die beim Öffnen extrem viel
+    // Speicher oder Rechenzeit verlangen (max. 1 GiB, 20 Durchläufe).
+    if params.m_cost > 1024 * 1024 || params.t_cost > 20 || params.p_cost > 16 {
+        return Err(StoreError::Format);
+    }
+    Ok((params, bytes[21..37].try_into().unwrap()))
+}
+
+/// Entschlüsselt den Inhalt mit einem bereits abgeleiteten Schlüssel.
+fn decrypt(bytes: &[u8], key: &[u8; 32]) -> Result<Database, StoreError> {
+    let nonce = Nonce::from_slice(&bytes[37..49]);
+    let cipher = Aes256Gcm::new_from_slice(key).map_err(|_| StoreError::Kdf)?;
+    let plain = Zeroizing::new(
+        cipher
+            .decrypt(
+                nonce,
+                Payload {
+                    msg: &bytes[HEADER_LEN..],
+                    aad: &bytes[..HEADER_LEN],
+                },
+            )
+            .map_err(|_| StoreError::WrongPassword)?,
+    );
+    let mut db: Database = serde_json::from_slice(&plain)?;
+    if db.format_version > crate::model::DB_FORMAT_VERSION {
+        return Err(StoreError::TooNew);
+    }
+    db.normalize();
+    Ok(db)
+}
+
+/// Zwischengespeicherter Schlüssel: (Salt, KDF-Parameter, Schlüssel).
+type DerivedKey = ([u8; 16], (u32, u32, u32), Zeroizing<[u8; 32]>);
+
+/// Ergebnis von [`Vault::rekey_backups`].
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct RekeyReport {
+    /// Mit dem neuen Passwort neu verschlüsselt
+    pub rekeyed: usize,
+    /// Mit einem noch älteren Passwort verschlüsselt – gelöscht
+    pub deleted: usize,
+}
+
 impl Vault {
     /// Legt eine neue, leere Datei an.
     pub fn create(
@@ -107,42 +170,9 @@ impl Vault {
     pub fn open(path: impl Into<PathBuf>, password: &str) -> Result<(Self, Database), StoreError> {
         let path = path.into();
         let bytes = fs::read(&path)?;
-        if bytes.len() < HEADER_LEN || &bytes[..8] != MAGIC {
-            return Err(StoreError::Format);
-        }
-        if bytes[8] > FILE_VERSION {
-            return Err(StoreError::TooNew);
-        }
-        let u32_at = |i: usize| u32::from_le_bytes(bytes[i..i + 4].try_into().unwrap());
-        let params = KdfParams {
-            m_cost: u32_at(9),
-            t_cost: u32_at(13),
-            p_cost: u32_at(17),
-        };
-        // Schutz vor absurden Parametern in manipulierten Dateien
-        if params.m_cost > 4 * 1024 * 1024 || params.t_cost > 100 || params.p_cost > 64 {
-            return Err(StoreError::Format);
-        }
-        let salt: [u8; 16] = bytes[21..37].try_into().unwrap();
-        let nonce = Nonce::from_slice(&bytes[37..49]);
+        let (params, salt) = read_header(&bytes)?;
         let key = derive_key(password, &salt, params)?;
-        let cipher = Aes256Gcm::new_from_slice(key.as_ref()).map_err(|_| StoreError::Kdf)?;
-        let plain = Zeroizing::new(
-            cipher
-                .decrypt(
-                    nonce,
-                    Payload {
-                        msg: &bytes[HEADER_LEN..],
-                        aad: &bytes[..HEADER_LEN],
-                    },
-                )
-                .map_err(|_| StoreError::WrongPassword)?,
-        );
-        let mut db: Database = serde_json::from_slice(&plain)?;
-        if db.format_version > crate::model::DB_FORMAT_VERSION {
-            return Err(StoreError::TooNew);
-        }
-        db.normalize();
+        let db = decrypt(&bytes, &key)?;
         Ok((
             Vault {
                 path,
@@ -202,6 +232,85 @@ impl Vault {
         self.save(db)
     }
 
+    /// Sicherungskopien dieser Datei auf das aktuelle (neue) Passwort umstellen.
+    ///
+    /// Nach einer Passwortänderung wären alte Sicherungen sonst weiter mit dem
+    /// alten Passwort lesbar. Kopien, die sich mit `old_password` öffnen lassen,
+    /// werden neu verschlüsselt; Kopien mit einem noch älteren (unbekannten)
+    /// Passwort werden gelöscht.
+    pub fn rekey_backups(&self, old_password: &str) -> Result<RekeyReport, StoreError> {
+        let mut report = RekeyReport::default();
+        let mut keys: Vec<DerivedKey> = Vec::new();
+        for path in self.backup_files()? {
+            let Ok(bytes) = fs::read(&path) else { continue };
+            let header = read_header(&bytes);
+            // Bereits mit dem aktuellen Schlüssel verschlüsselt?
+            if let Ok((params, salt)) = &header
+                && *salt == self.salt
+                && params.tuple() == self.params.tuple()
+            {
+                continue;
+            }
+            let db = header.ok().and_then(|(params, salt)| {
+                let idx = match keys
+                    .iter()
+                    .position(|(s, p, _)| *s == salt && *p == params.tuple())
+                {
+                    Some(i) => i,
+                    None => {
+                        keys.push((
+                            salt,
+                            params.tuple(),
+                            derive_key(old_password, &salt, params).ok()?,
+                        ));
+                        keys.len() - 1
+                    }
+                };
+                decrypt(&bytes, &keys[idx].2).ok()
+            });
+            match db {
+                Some(db) => {
+                    let tmp = path.with_extension(format!("{FILE_EXTENSION}.tmp"));
+                    fs::write(&tmp, self.encrypt(&db)?)?;
+                    fs::rename(&tmp, &path)?;
+                    report.rekeyed += 1;
+                }
+                None => {
+                    fs::remove_file(&path)?;
+                    report.deleted += 1;
+                }
+            }
+        }
+        Ok(report)
+    }
+
+    /// Alle Sicherungskopien dieser Datei, älteste zuerst.
+    fn backup_files(&self) -> Result<Vec<PathBuf>, StoreError> {
+        let dir = self.backup_dir();
+        if !dir.exists() {
+            return Ok(Vec::new());
+        }
+        let prefix = format!("{}_", self.stem());
+        let mut files: Vec<PathBuf> = fs::read_dir(&dir)?
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| {
+                p.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
+                    n.starts_with(&prefix) && n.ends_with(&format!(".{FILE_EXTENSION}"))
+                })
+            })
+            .collect();
+        files.sort(); // Zeitstempel sortieren lexikografisch korrekt
+        Ok(files)
+    }
+
+    fn stem(&self) -> String {
+        self.path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("gradecraft")
+            .to_string()
+    }
+
     /// Prüft ein Passwort gegen den aktuellen Schlüssel (z. B. beim Entsperren).
     pub fn verify_password(&self, password: &str) -> bool {
         derive_key(password, &self.salt, self.params).is_ok_and(|k| *k == *self.key)
@@ -248,25 +357,10 @@ impl Vault {
         }
         let dir = self.backup_dir();
         fs::create_dir_all(&dir)?;
-        let stem = self
-            .path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("gradecraft")
-            .to_string();
         let stamp = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S");
-        let target = dir.join(format!("{stem}_{stamp}.{FILE_EXTENSION}"));
+        let target = dir.join(format!("{}_{stamp}.{FILE_EXTENSION}", self.stem()));
         fs::copy(&self.path, &target)?;
-        let prefix = format!("{stem}_");
-        let mut existing: Vec<PathBuf> = fs::read_dir(&dir)?
-            .filter_map(|e| e.ok().map(|e| e.path()))
-            .filter(|p| {
-                p.file_name()
-                    .and_then(|n| n.to_str())
-                    .is_some_and(|n| n.starts_with(&prefix) && n.ends_with(FILE_EXTENSION))
-            })
-            .collect();
-        existing.sort(); // Zeitstempel sortieren lexikografisch korrekt
+        let mut existing = self.backup_files()?;
         while existing.len() > keep {
             let _ = fs::remove_file(existing.remove(0));
         }
@@ -322,6 +416,54 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(1100));
         }
         assert_eq!(fs::read_dir(v.backup_dir()).unwrap().count(), 2);
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn sicherungen_umschluesseln() {
+        let dir = tmpdir();
+        let path = dir.join("noten.gcdb");
+        let db = Database::new();
+        // Sicherung mit sehr altem Passwort „a“
+        let mut v = Vault::create(&path, "a", &db).unwrap();
+        v.backup(10).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        // Passwort „b“, Sicherung damit
+        v.change_password("b", &db).unwrap();
+        v.backup(10).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        // Wechsel auf „c“: Sicherung mit „b“ umschlüsseln, mit „a“ löschen
+        v.change_password("c", &db).unwrap();
+        v.backup(10).unwrap(); // bereits mit „c“ – bleibt unverändert
+        let report = v.rekey_backups("b").unwrap();
+        assert_eq!(
+            report,
+            RekeyReport {
+                rekeyed: 1,
+                deleted: 1
+            }
+        );
+        let files = v.backup_files().unwrap();
+        assert_eq!(files.len(), 2);
+        for f in &files {
+            assert!(
+                Vault::open(f, "c").is_ok(),
+                "alle Sicherungen mit neuem Passwort lesbar"
+            );
+            assert!(Vault::open(f, "b").is_err());
+        }
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn zu_hohe_kdf_parameter_abgelehnt() {
+        let dir = tmpdir();
+        let path = dir.join("noten.gcdb");
+        Vault::create(&path, "pw", &Database::new()).unwrap();
+        let mut raw = fs::read(&path).unwrap();
+        raw[9..13].copy_from_slice(&(4u32 * 1024 * 1024).to_le_bytes()); // 4 GiB
+        fs::write(&path, raw).unwrap();
+        assert!(matches!(Vault::open(&path, "pw"), Err(StoreError::Format)));
         fs::remove_dir_all(dir).ok();
     }
 

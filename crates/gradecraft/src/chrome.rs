@@ -297,6 +297,12 @@ impl Session {
                                     && let (Some(c), Some(s)) = (course, sel_student) {
                                         self.dialog = Some(Dialog::final_grade(&self.db, c, s, period));
                                     }
+                                if small_button(ui, ic::PRESENTATION_CHART, "Notenbesprechung", class.is_some() && sel_student.is_some())
+                                    .on_hover_text("Eigenes Fenster nur mit den Noten des ausgewählten Schülers")
+                                    .clicked()
+                                    && let (Some(c), Some(s)) = (class, sel_student) {
+                                        self.open_review(c, s, course);
+                                    }
                                 if small_button(ui, ic::FILE_CSV, "Notenliste exportieren", course.is_some()).clicked()
                                     && let Some(c) = course {
                                         self.export_course_csv(&ctx, c);
@@ -459,6 +465,15 @@ impl Session {
                                 && let Some(c) = class {
                                     self.export_pdf(&ctx, PdfKind::Conference(c, Period::Schuljahr));
                                 }
+                        });
+                        group(ui, "Besprechung", |ui| {
+                            if big_button(ui, ic::PRESENTATION_CHART, "Noten-\nbesprechung", class.is_some() && sel_student.is_some())
+                                .on_hover_text("Eigenes Fenster nur mit den Noten des ausgewählten Schülers (z. B. für den Beamer)")
+                                .clicked()
+                                && let (Some(c), Some(s)) = (class, sel_student)
+                            {
+                                self.open_review(c, s, course);
+                            }
                         });
                         group(ui, "Schülerbogen", |ui| {
                             if big_button(ui, ic::IDENTIFICATION_CARD, "Ausgewählter\nSchüler", class.is_some() && sel_student.is_some())

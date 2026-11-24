@@ -237,3 +237,26 @@ fn notenspiegel_fenster() {
     h.run();
     assert_eq!(h.state().dist_windows.len(), 1);
 }
+
+#[test]
+fn notenbesprechung_oeffnen_und_schliessen() {
+    let mut s = session();
+    let class = s.db.classes[0].id;
+    let course = s.db.courses[0].id;
+    let student = s.db.classes[0].students[2].id;
+    // Ohne Fachangabe: aktuell geöffnetes Fach
+    s.open_review(class, student, None);
+    assert_eq!(
+        s.review.map(|r| (r.course, r.student)),
+        Some((course, student))
+    );
+    let mut h = harness(s);
+    let ctx = h.ctx.clone();
+    let cfg = AppConfig::default();
+    h.state_mut().review_window(&ctx, &cfg);
+    assert!(h.state().review.is_some());
+    // Schüler gelöscht → Besprechung schließt sich
+    h.state_mut().db.delete_student(class, student);
+    h.state_mut().review_window(&ctx, &cfg);
+    assert!(h.state().review.is_none());
+}

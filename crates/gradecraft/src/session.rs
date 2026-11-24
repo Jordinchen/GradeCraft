@@ -108,6 +108,8 @@ pub struct Session {
     pub oral_date: chrono::NaiveDate,
     /// Offene Notenspiegel-Fenster: (Fach, Leistung)
     pub dist_windows: Vec<(Id, Id)>,
+    /// Geöffnete Notenbesprechung (eigenes Fenster)
+    pub review: Option<crate::review::Review>,
     /// Noten manuell verborgen (Sichtschutz)
     pub privacy_hidden: bool,
     /// Bitte an die App: jetzt nach Updates suchen.
@@ -149,6 +151,7 @@ impl Session {
             oral_date: crate::oral::today(),
             dist_windows: Vec::new(),
             privacy_hidden: false,
+            review: None,
         }
     }
 

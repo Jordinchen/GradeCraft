@@ -115,6 +115,7 @@ impl Session {
                         new1: String::new(),
                         new2: String::new(),
                         error: None,
+                        rekey: true,
                     });
                 }
             });

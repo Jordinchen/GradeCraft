@@ -14,9 +14,11 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       - name: Version bestimmen
         id: version
@@ -38,13 +40,15 @@ jobs:
       - name: Installer bauen (Inno Setup)
         shell: pwsh
         run: |
-          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) { choco install innosetup -y --no-progress }
+          # Nur das im GitHub-Runner-Image vorinstallierte Inno Setup verwenden –
+          # keine ungeprüfte Nachinstallation aus Paketquellen.
           $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
           if (-not $iscc) { $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" }
+          if (-not (Test-Path $iscc)) { throw "Inno Setup ist im Runner-Image nicht vorhanden" }
           & $iscc "/DAppVersion=${{ steps.version.outputs.version }}" "/DSourceExe=..\target\release\gradecraft.exe" installer\gradecraft.iss
           Copy-Item target\release\gradecraft.exe "dist\GradeCraft-${{ steps.version.outputs.version }}-portable.exe"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: GradeCraft-Windows
           path: dist/*
@@ -53,7 +57,7 @@ jobs:
       # Beim manuellen Start wird das Tag v<Version> automatisch erzeugt.
       - name: GitHub-Release veröffentlichen
         if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: v${{ steps.version.outputs.version }}
           target_commitish: ${{ github.sha }}

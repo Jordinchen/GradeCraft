@@ -100,10 +100,17 @@ pub fn parse_students(text: &str) -> Vec<ImportedStudent> {
 }
 
 fn esc(s: &str) -> String {
-    if s.contains([';', '"', '\n']) {
-        format!("\"{}\"", s.replace('"', "\"\""))
+    // Schutz vor Formel-Einschleusung („CSV injection“): Excel und LibreOffice
+    // werten Zellen, die mit = + - @ (oder Tab/CR) beginnen, als Formel aus.
+    let s = if s.starts_with(['=', '+', '-', '@', '\t', '\r']) {
+        format!("'{s}")
     } else {
         s.to_string()
+    };
+    if s.contains([';', '"', '\n', '\r']) {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s
     }
 }
 
@@ -216,6 +223,16 @@ mod tests {
         let s = parse_students("Müller\tAnna\tw\nSchmidt\tBen\n");
         assert_eq!(s[1].first_name, "Ben");
         assert_eq!(s[1].gender, Gender::Ohne);
+    }
+
+    #[test]
+    fn formeln_entschaerft() {
+        assert_eq!(esc("=HYPERLINK(\"x\")"), "\"'=HYPERLINK(\"\"x\"\")\"");
+        assert_eq!(esc("+49"), "'+49");
+        assert_eq!(esc("-1"), "'-1");
+        assert_eq!(esc("@SUM(A1)"), "'@SUM(A1)");
+        assert_eq!(esc("Müller"), "Müller");
+        assert_eq!(esc("2\u{2212}"), "2\u{2212}"); // Note mit typografischem Minus bleibt
     }
 
     #[test]

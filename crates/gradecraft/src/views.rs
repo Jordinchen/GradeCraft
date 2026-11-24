@@ -181,6 +181,7 @@ impl Session {
         }
         let mut delete: Option<Id> = None;
         let mut pdf_for: Option<Id> = None;
+        let mut review_for: Option<Id> = None;
         let mut moved: Option<(usize, usize)> = None;
         card(ui, |ui| {
             egui::ScrollArea::vertical()
@@ -246,6 +247,13 @@ impl Session {
                                     {
                                         pdf_for = Some(s.id);
                                     }
+                                    if ui
+                                        .small_button(ic::PRESENTATION_CHART)
+                                        .on_hover_text("Notenbesprechung")
+                                        .clicked()
+                                    {
+                                        review_for = Some(s.id);
+                                    }
                                     if !ro {
                                         if ui
                                             .small_button(ic::ARROW_UP)
@@ -295,6 +303,9 @@ impl Session {
                 c.students.swap(a, b);
             }
             self.touch(&ctx);
+        }
+        if let Some(sid) = review_for {
+            self.open_review(class_id, sid, None);
         }
         if let Some(sid) = pdf_for {
             self.export_pdf(

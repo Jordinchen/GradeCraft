@@ -330,6 +330,13 @@ impl GradeCraftApp {
             let col = s.db.courses[0].scheme.areas[0].columns[0].id;
             s.open_distribution(course, col);
         }
+        if opts.contains_key("embed") {
+            ctx.set_embed_viewports(true);
+        }
+        if opts.contains_key("review") {
+            let st = s.db.classes[0].students[3].id;
+            s.open_review(class, st, Some(course));
+        }
         if opts.contains_key("hide") {
             s.privacy_hidden = true;
         }
@@ -795,6 +802,7 @@ impl eframe::App for GradeCraftApp {
         }
 
         s.distribution_windows(&ctx);
+        s.review_window(&ctx, cfg);
         s.show_dialog(&ctx, cfg);
 
         // Sichtschutz: Noten verdecken, wenn das Fenster nicht aktiv ist oder auf Wunsch

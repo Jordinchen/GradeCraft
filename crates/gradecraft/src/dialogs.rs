@@ -88,6 +88,8 @@ pub enum Dialog {
         new1: String,
         new2: String,
         error: Option<String>,
+        /// Sicherungskopien auf das neue Passwort umstellen
+        rekey: bool,
     },
     NewYear {
         name: String,
@@ -579,7 +581,7 @@ impl Session {
                         outcome = Outcome::Close;
                     }
                 }
-                Dialog::ChangePassword { old, new1, new2, error } => {
+                Dialog::ChangePassword { old, new1, new2, error, rekey } => {
                     title(ui, ic::KEY, "Passwort ändern");
                     egui::Grid::new("pw").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
                         ui.label("Aktuelles Passwort");
@@ -593,6 +595,16 @@ impl Session {
                         ui.end_row();
                     });
                     password_strength(ui, new1);
+                    ui.add_space(4.0);
+                    ui.checkbox(rekey, "Sicherungskopien auf das neue Passwort umstellen");
+                    ui.label(
+                        RichText::new(
+                            "Empfohlen: Sonst lassen sich alte Sicherungen weiter mit dem alten Passwort öffnen. \
+                             Kopien mit einem noch älteren Passwort werden dabei gelöscht.",
+                        )
+                        .size(12.0)
+                        .color(p.text_weak),
+                    );
                     if let Some(e) = error {
                         ui.label(RichText::new(e.as_str()).color(p.bad));
                     }
@@ -607,7 +619,19 @@ impl Session {
                             match self.vault.change_password(new1, &self.db) {
                                 Ok(()) => {
                                     self.dirty = false;
-                                    self.notify(ctx, "Passwort geändert", false);
+                                    let msg = if *rekey {
+                                        match self.vault.rekey_backups(old) {
+                                            Ok(r) if r.deleted > 0 => format!(
+                                                "Passwort geändert · {} Sicherungen umgestellt, {} ältere gelöscht",
+                                                r.rekeyed, r.deleted
+                                            ),
+                                            Ok(r) => format!("Passwort geändert · {} Sicherungen umgestellt", r.rekeyed),
+                                            Err(e) => format!("Passwort geändert, Sicherungen konnten nicht umgestellt werden: {e}"),
+                                        }
+                                    } else {
+                                        "Passwort geändert".to_string()
+                                    };
+                                    self.notify(ctx, &msg, false);
                                     outcome = Outcome::Close;
                                 }
                                 Err(e) => *error = Some(e.to_string()),

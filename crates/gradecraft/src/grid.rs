@@ -1073,10 +1073,42 @@ impl Session {
                         FontId::proportional(14.0),
                         p.text,
                     );
-                    let resp = ui.interact(r, ui.id().with(("name", s.id)), Sense::CLICK);
+                    let resp = ui
+                        .interact(r, ui.id().with(("name", s.id)), Sense::CLICK)
+                        .on_hover_text("Doppelklick: Notenbesprechung");
                     if resp.clicked() {
                         self.grid.sel = Some((row, self.grid.sel.map(|(_, c)| c).unwrap_or(0)));
                     }
+                    if resp.double_clicked() {
+                        self.open_review(course.class_id, s.id, Some(course.id));
+                    }
+                    resp.context_menu(|ui| {
+                        if ui
+                            .button(format!(
+                                "{} Notenbesprechung öffnen",
+                                ic::PRESENTATION_CHART
+                            ))
+                            .clicked()
+                        {
+                            self.open_review(course.class_id, s.id, Some(course.id));
+                            ui.close();
+                        }
+                        if ui
+                            .button(format!("{} Schülerbogen als PDF", ic::FILE_PDF))
+                            .clicked()
+                        {
+                            let ctx = ui.ctx().clone();
+                            self.export_pdf(
+                                &ctx,
+                                crate::reports::PdfKind::Sheets {
+                                    class: course.class_id,
+                                    student: Some(s.id),
+                                    course: None,
+                                },
+                            );
+                            ui.close();
+                        }
+                    });
                 }
                 GCol::Grade { col: column, .. } => {
                     let ecol = edit_cols.iter().position(|&e| e == ci).unwrap();
