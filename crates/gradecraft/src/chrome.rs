@@ -20,11 +20,7 @@ impl Session {
         ui.horizontal(|ui| {
             ui.set_height(34.0);
             ui.add_space(6.0);
-            ui.label(
-                RichText::new(ic::GRADUATION_CAP)
-                    .size(20.0)
-                    .color(p.accent_text),
-            );
+            theme::logo_image(ui, 24.0);
             ui.label(
                 RichText::new("GradeCraft")
                     .font(theme::bold(14.0))

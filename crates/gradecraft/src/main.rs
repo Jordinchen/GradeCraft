@@ -35,7 +35,7 @@ fn main() -> eframe::Result {
     )
 }
 
-/// Programm-Icon (lila Kachel mit Doktorhut) für Fenster und Taskleiste.
+/// Programm-Icon (Wolpertinger) für Fenster und Taskleiste.
 fn app_icon() -> egui::IconData {
     let png = include_bytes!("../assets/icon-256.png");
     eframe::icon_data::from_png_bytes(png).unwrap_or_default()

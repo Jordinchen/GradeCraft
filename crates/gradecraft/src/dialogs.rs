@@ -756,7 +756,11 @@ impl Session {
                     }
                 }
                 Dialog::About => {
-                    title(ui, ic::GRADUATION_CAP, "Über GradeCraft");
+                    ui.horizontal(|ui| {
+                        theme::logo_image(ui, 72.0);
+                        ui.label(RichText::new("GradeCraft").font(theme::bold(24.0)).color(p.accent_text));
+                    });
+                    ui.add_space(6.0);
                     ui.label(format!("Version {}", env!("CARGO_PKG_VERSION")));
                     ui.label("Notenverwaltung für Lehrkräfte – lokal, verschlüsselt, in Rust geschrieben.");
                     ui.hyperlink_to("Projektseite auf GitHub", format!("https://github.com/{}", crate::updater::UPDATE_REPO));

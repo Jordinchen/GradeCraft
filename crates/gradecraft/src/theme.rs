@@ -245,3 +245,30 @@ pub fn install_fonts(ctx: &egui::Context) {
 pub fn bold(size: f32) -> egui::FontId {
     egui::FontId::new(size, FontFamily::Name("bold".into()))
 }
+
+/// Programm-Icon (Wolpertinger) als Textur; wird einmal geladen und zwischengespeichert.
+pub fn logo(ctx: &egui::Context) -> egui::TextureHandle {
+    let id = egui::Id::new("gradecraft-logo");
+    if let Some(t) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
+        return t;
+    }
+    let icon = eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon-256.png"))
+        .unwrap_or_default();
+    let image = egui::ColorImage::from_rgba_unmultiplied(
+        [icon.width as usize, icon.height as usize],
+        &icon.rgba,
+    );
+    let options = egui::TextureOptions {
+        mipmap_mode: Some(egui::TextureFilter::Linear),
+        ..egui::TextureOptions::LINEAR
+    };
+    let tex = ctx.load_texture("gradecraft-logo", image, options);
+    ctx.data_mut(|d| d.insert_temp(id, tex.clone()));
+    tex
+}
+
+/// Logo in der angegebenen Größe (Punkte) anzeigen.
+pub fn logo_image(ui: &mut egui::Ui, size: f32) -> egui::Response {
+    let tex = logo(ui.ctx());
+    ui.add(egui::Image::new(&tex).fit_to_exact_size(egui::vec2(size, size)))
+}

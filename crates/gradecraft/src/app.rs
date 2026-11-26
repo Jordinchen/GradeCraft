@@ -411,7 +411,8 @@ impl GradeCraftApp {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                 ui.add_space(((ui.available_height() - 560.0) / 2.0).max(24.0));
                 ui.vertical_centered(|ui| {
-                    ui.label(RichText::new(ic::GRADUATION_CAP).size(56.0).color(p.accent_text));
+                    theme::logo_image(ui, 128.0);
+                    ui.add_space(6.0);
                     ui.label(RichText::new("GradeCraft").font(theme::bold(34.0)).color(p.accent_text));
                     ui.label(RichText::new("Notenverwaltung – lokal & verschlüsselt").color(p.text_weak));
                     ui.add_space(20.0);
