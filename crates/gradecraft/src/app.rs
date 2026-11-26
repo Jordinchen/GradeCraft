@@ -252,6 +252,9 @@ impl GradeCraftApp {
             };
             theme::apply(ctx, self.cfg.theme);
         }
+        if opts.get("nav") == Some(&"0") {
+            self.cfg.show_nav = false;
+        }
         // Ohne Fenstermanager ist das Fenster nie „aktiv“ – Sichtschutz nur auf Wunsch
         self.cfg.privacy_on_blur = opts.contains_key("privacy");
         if opts.get("view") == Some(&"start") {
@@ -329,6 +332,40 @@ impl GradeCraftApp {
         if opts.contains_key("dist") {
             let col = s.db.courses[0].scheme.areas[0].columns[0].id;
             s.open_distribution(course, col);
+        }
+        if let Some(n) = opts.get("classes").and_then(|n| n.parse::<usize>().ok()) {
+            let subjects = [
+                "Deutsch/Kommunikation",
+                "Wirtschafts- und Betriebslehre",
+                "Politik/Gesellschaftslehre",
+                "Englisch",
+            ];
+            for i in 0..n {
+                let cid = s.db.alloc_id();
+                let year = s.db.school_years[0].id;
+                s.db.classes.push(gradecraft_core::SchoolClass {
+                    id: cid,
+                    year_id: year,
+                    name: format!("AVT{}26", i + 1),
+                    students: vec![],
+                });
+                for sub in subjects.iter().take(i % 4 + 1) {
+                    let scheme = s.db.default_scheme(2, 2);
+                    let id = s.db.alloc_id();
+                    s.db.courses.push(gradecraft_core::Course {
+                        id,
+                        class_id: cid,
+                        subject: sub.to_string(),
+                        short: String::new(),
+                        scale: gradecraft_core::ScaleKind::Noten,
+                        scheme,
+                        grades: vec![],
+                        finals: vec![],
+                        oral: vec![],
+                        oral_scheme: Default::default(),
+                    });
+                }
+            }
         }
         if opts.contains_key("embed") {
             ctx.set_embed_viewports(true);
@@ -707,6 +744,10 @@ impl eframe::App for GradeCraftApp {
         }
 
         s.tick(&ctx, cfg);
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::B)) {
+            cfg.show_nav = !cfg.show_nav;
+            cfg.save();
+        }
         let title = format!(
             "{} – GradeCraft",
             s.vault
@@ -786,7 +827,42 @@ impl eframe::App for GradeCraftApp {
                                 bottom: 8,
                             }),
                     )
-                    .show(ui, |ui| s.navigation(ui));
+                    .show(ui, |ui| s.navigation(ui, cfg));
+            } else {
+                // Eingeklappt: schmale Leiste mit Knopf zum Ausklappen
+                egui::Panel::left("nav-collapsed")
+                    .exact_size(38.0)
+                    .resizable(false)
+                    .frame(
+                        egui::Frame::new()
+                            .fill(p.chrome)
+                            .inner_margin(egui::Margin::symmetric(5, 10)),
+                    )
+                    .show(ui, |ui| {
+                        if crate::chrome::icon_button(
+                            ui,
+                            ic::CARET_DOUBLE_RIGHT,
+                            "Navigation ausklappen (Strg+B)",
+                            true,
+                        )
+                        .clicked()
+                        {
+                            cfg.show_nav = true;
+                            cfg.save();
+                        }
+                        ui.add_space(6.0);
+                        if crate::chrome::icon_button(
+                            ui,
+                            ic::SIDEBAR,
+                            "Navigation ausklappen (Strg+B)",
+                            true,
+                        )
+                        .clicked()
+                        {
+                            cfg.show_nav = true;
+                            cfg.save();
+                        }
+                    });
             }
             egui::CentralPanel::default()
                 .frame(

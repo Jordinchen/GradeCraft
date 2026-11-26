@@ -10,6 +10,9 @@ use crate::session::{Session, View};
 use crate::theme::{self, Palette};
 use crate::widgets::{card, fmt_weight, primary_button, section_title, weight_edit};
 
+/// Klassenkarte der Startansicht: (ID, Name, Schülerzahl, Fächer).
+type ClassCard = (Id, String, usize, Vec<(Id, String)>);
+
 impl Session {
     pub fn welcome_view(&mut self, ui: &mut egui::Ui) {
         let p = Palette::get(ui.ctx());
@@ -24,49 +27,115 @@ impl Session {
                 .color(p.text_weak),
         );
         ui.add_space(14.0);
-        let classes: Vec<_> = self
+        let classes: Vec<ClassCard> = self
             .db
             .classes_of_year(self.year)
-            .map(|c| (c.id, c.name.clone(), c.students.len()))
+            .map(|c| {
+                let courses = self
+                    .db
+                    .courses_of_class(c.id)
+                    .map(|k| (k.id, k.title()))
+                    .collect();
+                (c.id, c.name.clone(), c.students.len(), courses)
+            })
             .collect();
-        ui.horizontal_wrapped(|ui| {
-            for (id, name, n) in classes {
-                let courses: Vec<String> =
-                    self.db.courses_of_class(id).map(|c| c.title()).collect();
-                let resp = egui::Frame::new()
-                    .fill(p.sheet)
-                    .stroke(egui::Stroke::new(1.0, p.border))
-                    .corner_radius(egui::CornerRadius::same(6))
-                    .inner_margin(egui::Margin::same(14))
-                    .show(ui, |ui| {
-                        ui.set_width(220.0);
-                        ui.label(
-                            RichText::new(format!("{}  {}", ic::CHALKBOARD_TEACHER, name))
-                                .font(theme::bold(18.0))
-                                .color(p.accent_text),
-                        );
-                        ui.label(format!("{n} Schüler"));
-                        ui.label(
-                            RichText::new(if courses.is_empty() {
-                                "Noch keine Fächer".into()
-                            } else {
-                                courses.join(", ")
-                            })
-                            .color(p.text_weak),
-                        );
-                    })
-                    .response
-                    .interact(egui::Sense::click())
-                    .on_hover_cursor(egui::CursorIcon::PointingHand);
-                if resp.clicked() {
-                    self.open_view(View::Class(id));
+        let mut open: Option<View> = None;
+        let mut new_class = false;
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                // Raster: Kartenbreite passt sich an, alle Karten gleich groß
+                const GAP: f32 = 14.0;
+                const MIN_W: f32 = 240.0;
+                const CARD_H: f32 = 162.0;
+                let avail = ui.available_width() - 4.0;
+                let per_row = ((avail + GAP) / (MIN_W + GAP)).floor().max(1.0) as usize;
+                let card_w = ((avail - GAP * (per_row as f32 - 1.0)) / per_row as f32).min(360.0);
+                for row in classes.chunks(per_row) {
+                    ui.horizontal_top(|ui| {
+                        ui.spacing_mut().item_spacing.x = GAP;
+                        for (id, name, n, courses) in row {
+                            let (rect, resp) = ui.allocate_exact_size(
+                                egui::vec2(card_w, CARD_H),
+                                egui::Sense::click(),
+                            );
+                            let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+                            let hovered = resp.hovered();
+                            ui.painter().rect(
+                                rect,
+                                egui::CornerRadius::same(8),
+                                p.sheet,
+                                egui::Stroke::new(
+                                    if hovered { 1.5 } else { 1.0 },
+                                    if hovered { p.accent_text } else { p.border },
+                                ),
+                                egui::StrokeKind::Inside,
+                            );
+                            if resp.clicked() {
+                                open = Some(View::Class(*id));
+                            }
+                            let mut child = ui.new_child(
+                                egui::UiBuilder::new()
+                                    .max_rect(rect.shrink(14.0))
+                                    .layout(egui::Layout::top_down(egui::Align::LEFT)),
+                            );
+                            child.set_clip_rect(rect.shrink(6.0));
+                            child.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new(format!("{}  {}", ic::CHALKBOARD_TEACHER, name))
+                                        .font(theme::bold(18.0))
+                                        .color(p.accent_text),
+                                );
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        ui.label(
+                                            RichText::new(format!("{n} Schüler"))
+                                                .color(p.text_weak),
+                                        );
+                                    },
+                                );
+                            });
+                            child.add_space(6.0);
+                            if courses.is_empty() {
+                                child.label(RichText::new("Noch keine Fächer").color(p.text_weak));
+                            }
+                            let shown = courses.len().min(3);
+                            for (cid, title) in &courses[..shown] {
+                                let r = child.add(
+                                    egui::Button::new(
+                                        RichText::new(format!("{}  {}", ic::BOOK_OPEN, title))
+                                            .color(p.text),
+                                    )
+                                    .frame(false)
+                                    .truncate(),
+                                );
+                                if r.on_hover_text(title).clicked() {
+                                    open = Some(View::Course(*cid));
+                                }
+                            }
+                            if courses.len() > shown {
+                                child.label(
+                                    RichText::new(format!("+ {} weitere", courses.len() - shown))
+                                        .size(12.0)
+                                        .color(p.text_weak),
+                                );
+                            }
+                        }
+                    });
+                    ui.add_space(GAP);
                 }
-            }
-        });
-        ui.add_space(14.0);
-        if !self.year_archived()
-            && primary_button(ui, &format!("{}  Neue Klasse anlegen", ic::PLUS)).clicked()
-        {
+                ui.add_space(4.0);
+                if !self.year_archived()
+                    && primary_button(ui, &format!("{}  Neue Klasse anlegen", ic::PLUS)).clicked()
+                {
+                    new_class = true;
+                }
+            });
+        if let Some(v) = open {
+            self.open_view(v);
+        }
+        if new_class {
             self.dialog = Some(Dialog::NewClass {
                 name: String::new(),
             });

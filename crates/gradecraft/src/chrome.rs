@@ -573,11 +573,24 @@ impl Session {
     }
 
     /// Navigationsbereich links: Schuljahr, Klassen, Fächer.
-    pub fn navigation(&mut self, ui: &mut egui::Ui) {
+    pub fn navigation(&mut self, ui: &mut egui::Ui, cfg: &mut AppConfig) {
         let p = Palette::get(ui.ctx());
         ui.add_space(10.0);
         ui.horizontal(|ui| {
             ui.label(RichText::new("Navigation").font(theme::bold(17.0)));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if icon_button(
+                    ui,
+                    ic::CARET_DOUBLE_LEFT,
+                    "Navigation einklappen (Strg+B)",
+                    true,
+                )
+                .clicked()
+                {
+                    cfg.show_nav = false;
+                    cfg.save();
+                }
+            });
         });
         ui.add_space(6.0);
         let year_name = self
@@ -972,13 +985,22 @@ fn nav_item(
     } else {
         FontId::proportional(14.0)
     };
-    ui.painter().text(
-        egui::pos2(x + 22.0, rect.center().y),
-        Align2::LEFT_CENTER,
-        text,
-        font,
+    // Lange Namen mit „…“ kürzen, damit nichts über den Rand läuft
+    let max_w = (rect.right() - (x + 22.0) - if badge.is_empty() { 8.0 } else { 34.0 }).max(20.0);
+    let mut job = egui::text::LayoutJob::simple_singleline(text.to_string(), font, p.text);
+    job.wrap = egui::text::TextWrapping::truncate_at_width(max_w);
+    let galley = ui.painter().layout_job(job);
+    let truncated = galley.elided;
+    ui.painter().galley(
+        egui::pos2(x + 22.0, rect.center().y - galley.size().y / 2.0),
+        galley,
         p.text,
     );
+    let resp = if truncated {
+        resp.on_hover_text(text)
+    } else {
+        resp
+    };
     if !badge.is_empty() {
         ui.painter().text(
             rect.right_center() - vec2(10.0, 0.0),
